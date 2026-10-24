@@ -1,0 +1,58 @@
+% Source: zcash/zips commit 2bdf39494320e5e04057ac93b1794031ebfb00b5, protocol/protocol.tex lines 10023-10076
+% Spec version: v2026.7.0-344-g2bdf39 [NU6.2], section 5.4.1.11 "Equihash Generator"
+% Pinned: 2026-10-24
+
+\lsubsubsubsection{Equihash Generator}{equihashgen}
+
+$\EquihashGen{n, k}$ is a specialized \hashFunction that maps an input
+and an index to an output of length $n$ bits. It is used in \crossref{equihash}.
+
+\newsavebox{\powtagbox}
+\begin{lrbox}{\powtagbox}
+\begin{bytefield}[bitwidth=0.16em]{128}
+    \sbitbox{64}{64-bit $\ascii{ZcashPoW}$} &
+    \sbitbox{32}{32-bit $n$} &
+    \sbitbox{32}{32-bit $k$}
+\end{bytefield}
+\end{lrbox}
+
+\newsavebox{\powcountbox}
+\begin{lrbox}{\powcountbox}
+\begin{bytefield}[bitwidth=0.16em]{32}
+    \sbitbox{32}{32-bit $g$}
+\end{bytefield}
+\end{lrbox}
+
+Let $\powtag := \Justthebox{\powtagbox}$.
+
+Let $\powcount(g) := \Justthebox{\powcountbox}$.
+
+\vspace{2ex}
+\introlist
+% Blech. Dijkstra was right \cite{EWD-831}.
+Let $\EquihashGen{n, k}(S, i) := T_\barerange{h+1}{h+n}$, where
+\begin{formulae}
+  \item $m = \floor{\frac{512}{n}}$;
+  \item $h = (i-1 \bmod m) \mult n$;
+  \item $T = \BlakeTwobOf{(\mathnormal{n \mult m})}{\powtag,\, S \bconcat \powcount(\floor{\frac{i-1}{m}})}$.
+\end{formulae}
+
+Indices of bits in $T$ are 1-based.
+
+$\BlakeTwobOf{\ell}{p, x}$ is defined in \crossref{concreteblake2}.
+
+\securityrequirement{
+$\BlakeTwobOf{\ell}{\powtag, x}$ must generate output that is sufficiently
+unpredictable to avoid short-cuts to the \Equihash solution process.
+It would suffice to model it as a \randomOracle.
+}
+
+\pnote{
+When $\EquihashGen{}$ is evaluated for sequential indices, as
+in the \Equihash solving process (\crossref{equihash}),
+the number of calls to $\BlakeTwobGeneric$ can be reduced by a factor of
+$\floor{\frac{512}{n}}$ in the best case (which is a factor of 2 for
+$n = 200$).
+}
+
+

@@ -1,0 +1,52 @@
+[package]
+name = "zakura-equihash"
+description = "The Equihash Proof-of-Work function"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["std"]
+std = []
+
+## Experimental pure Rust Tromp solver support.
+## Enables runtime CPU detection in the Rust BLAKE2b backend.
+solver = ["dep:libc", "std", "blake2b_simd/std"]
+
+[dependencies]
+corez = { version = "0.1.1", default-features = false, features = ["alloc"] }
+blake2b_simd = { version = "1", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Huge pages are an optional hint for the solver's anonymous mappings.
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+equihash_reference = { package = "equihash", version = "=0.3.0" }
+hex = "0.4"
+rand = "0.10"
+
+[lib]
+name = "equihash"
+bench = false
+
+[[bench]]
+name = "solver"
+harness = false
+required-features = ["solver"]
+
+[[bench]]
+name = "verify"
+harness = false
+
+[[example]]
+name = "generate-equihash-compatibility"
+required-features = ["solver"]
