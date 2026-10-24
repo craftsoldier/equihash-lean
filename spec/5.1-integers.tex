@@ -1,0 +1,44 @@
+% Source: zcash/zips commit 2bdf39494320e5e04057ac93b1794031ebfb00b5, protocol/protocol.tex lines 8898-8937
+% Spec version: v2026.7.0-344-g2bdf39 [NU6.2], section 5.1 "Integers, Bit Sequences, and Endianness"
+% Pinned: 2026-10-24
+
+\lsubsection{Integers, Bit Sequences, and Endianness}{endian}
+
+All integers in \Zcash-specific encodings are unsigned, have a fixed
+bit length, and are encoded in little-endian byte order \emph{unless otherwise
+specified}.
+
+\introlist
+The following functions convert between sequences of bits, sequences of bytes,
+and integers:
+
+\begin{itemize}
+  \item $\ItoLEBSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} \rightarrow \bitseq{\ell}$,
+        such that $\ItoLEBSPOf{\ell}{x}$ is the sequence of $\ell$ bits representing $x$ in
+        little-endian order;
+  \item $\ItoLEOSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} \rightarrow \byteseq{\sceiling{\ell/8}}$,
+        such that $\ItoLEBSPOf{\ell}{x}$ is the sequence of $\ceiling{\ell/8}$ bytes representing $x$ in
+        little-endian order;
+  \item $\ItoBEBSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} \rightarrow \bitseq{\ell}$
+        such that $\ItoBEBSPOf{\ell}{x}$ is the sequence of $\ell$ bits representing $x$ in
+        big-endian order.
+  \item $\LEBStoIP{} \typecolon (\ell \typecolon \Nat) \times \bitseq{\ell} \rightarrow \binaryrange{\ell}$
+        such that $\LEBStoIPOf{\ell}{S}$ is the integer represented in little-endian order by the
+        \bitSequence $S$ of length $\ell$.
+  \item $\LEOStoIP{} \typecolon (\ell \typecolon \Nat \suchthat \ell \bmod 8 = 0) \times \byteseq{\ell/8} \rightarrow \binaryrange{\ell}$
+        such that $\LEOStoIPOf{\ell}{S}$ is the integer represented in little-endian order by the
+        \byteSequence $S$ of length $\ell/8$.
+\notbeforenufive{
+  \item $\BEOStoIP{} \typecolon (\ell \typecolon \Nat \suchthat \ell \bmod 8 = 0) \times \byteseq{\ell/8} \rightarrow \binaryrange{\ell}$
+        such that $\BEOStoIPOf{\ell}{S}$ is the integer represented in big-endian order by the
+        \byteSequence $S$ of length $\ell/8$.
+} %notbeforenufive
+  \item $\LEBStoOSP{} \typecolon (\ell \typecolon \Nat) \times \bitseq{\ell} \rightarrow \byteseq{\sceiling{\ell/8}}$
+        defined as follows: pad the input on the right with $8 \mult \ceiling{\ell/8} - \ell$ zero bits
+        so that its length is a multiple of 8 bits. Then convert each group of 8 bits to a byte
+        value with the \emph{least} significant bit first, and concatenate the resulting bytes
+        in the same order as the groups.
+  \item $\LEOStoBSP{} \typecolon (\ell \typecolon \Nat \suchthat \ell \bmod 8 = 0) \times \byteseq{\sceiling{\ell/8}} \rightarrow \bitseq{\ell}$
+        defined as follows: convert each byte to a group of 8 bits with the \emph{least} significant
+        bit first, and concatenate the resulting groups in the same order as the bytes.
+\end{itemize}

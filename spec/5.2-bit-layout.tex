@@ -1,0 +1,21 @@
+% Source: zcash/zips commit 2bdf39494320e5e04057ac93b1794031ebfb00b5, protocol/protocol.tex lines 8941-8957
+% Spec version: v2026.7.0-344-g2bdf39 [NU6.2], section 5.2 "Bit layout diagrams"
+% Pinned: 2026-10-24
+
+\extralabel{boxnotation}{\lsubsection{Bit layout diagrams}{bitlayout}}
+
+We sometimes use bit layout diagrams, in which each box of the diagram represents
+a sequence of bits. Diagrams are read from left to right, with lines read from
+top to bottom; the breaking of boxes across lines has no significance.
+The bit length $\ell$ is given explicitly in each box, except when it is obvious
+(e.g. for a single bit, or for the notation $\zeros{\ell}$ representing the sequence
+of $\ell$ zero bits, or for the output of $\LEBStoOSP{\ell}$).
+
+The entire diagram represents the sequence of \emph{bytes} formed by first
+concatenating these \bitSequences, and then treating each subsequence of 8 bits
+as a byte with the bits ordered from \emph{most significant} to
+\emph{least significant}. Thus the \emph{most significant} bit in each byte
+is toward the left of a diagram. \sapling{(This convention is used only in
+descriptions of the \Sprout design; in the \SaplingAndOrchard additions,
+\bitSequence/\byteSequence conversions are always specified explicitly.)} Where bit fields
+are used, the text will clarify their position in each case.
