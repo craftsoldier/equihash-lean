@@ -4,7 +4,7 @@ indices, each the next `n/(k+1) + 1` bits of the solution, most significant firs
 -/
 module
 
-public import Equihash.Proofs.Tree
+public import Equihash.Proofs.SinglePass
 
 @[expose] public section
 

@@ -4,7 +4,7 @@ Leaves: a node for one index holds §5.4.1.11's hash value for it. What `initial
 -/
 module
 
-public import Equihash.Verifier.Verify
+public import Equihash.Verifier.Recursive
 public import Equihash.Proofs.Params
 public import Equihash.Proofs.Minimal
 public import Equihash.Proofs.Digits

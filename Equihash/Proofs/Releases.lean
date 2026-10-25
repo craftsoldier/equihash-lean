@@ -4,6 +4,7 @@ bytes that encode a §7.7.1-valid solution with no repeated index.
 -/
 module
 
+public import Equihash.Verifier.Releases
 public import Equihash.Proofs.LeafHash
 
 @[expose] public section

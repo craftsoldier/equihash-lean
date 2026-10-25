@@ -1,0 +1,95 @@
+name: Lean
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  build:
+    # The required status check on `main`.
+    name: Lean CI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Each folder in `rust/` must be its pinned source, unmodified: a crates.io crate
+      # (its `.crate` file's SHA-256, also checked against the crates.io index) or a
+      # directory of a git repository at a commit. One pin per line:
+      #   crates <name> <version> <sha256> <folder>
+      #   git <repository> <commit> <directory> <folder>
+      - name: Check the pinned sources
+        env:
+          PINS: |
+            crates zakura-equihash 4.0.0 b2f460f432240b51eba911f4389ac40a549399cd14589d6773cb39239583f20c rust/zakura-equihash-4.0.0
+        run: |
+          set -euo pipefail
+          pinned=()
+          while read -r kind a b c folder; do
+            [ -n "$kind" ] || continue
+            pinned+=("$folder")
+            tmp=$(mktemp -d)
+            case "$kind" in
+              crates)
+                name=$a version=$b sha=$c
+                # Index paths are lowercase.
+                lower=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+                case ${#lower} in
+                  1) prefix=1 ;;
+                  2) prefix=2 ;;
+                  3) prefix=3/${lower:0:1} ;;
+                  *) prefix=${lower:0:2}/${lower:2:2} ;;
+                esac
+                indexed=$(curl -sSfL "https://index.crates.io/$prefix/$lower" \
+                  | jq -r --arg v "$version" 'select(.vers == $v) | .cksum')
+                [ "$indexed" = "$sha" ] \
+                  || { echo "::error::$name $version: index checksum $indexed, pinned $sha"; exit 1; }
+                curl -sSfL -o "$tmp/crate" \
+                  "https://static.crates.io/crates/$name/$name-$version.crate"
+                echo "$sha  $tmp/crate" | sha256sum -c -
+                tar -xzf "$tmp/crate" -C "$tmp"
+                source="$tmp/$name-$version"
+                ;;
+              git)
+                repository=$a commit=$b directory=$c
+                # The clone lives outside `$tmp`, so it never shows up in the comparison.
+                repo=$(mktemp -d)
+                git init -q "$repo"
+                git -C "$repo" fetch -q --depth 1 "$repository" "$commit"
+                [ "$(git -C "$repo" rev-parse FETCH_HEAD)" = "$commit" ] \
+                  || { echo "::error::$repository: fetched a commit other than $commit"; exit 1; }
+                # `git archive` honours the pinned repository's `export-ignore` and
+                # `export-subst` attributes; a pinned directory that uses them would need
+                # another extraction.
+                git -C "$repo" archive FETCH_HEAD "$directory" | tar -x -C "$tmp"
+                source="$tmp/$directory"
+                ;;
+              *) echo "::error::unknown pin kind $kind"; exit 1 ;;
+            esac
+            diff -r "$source" "$folder" \
+              || { echo "::error::$folder differs from its pinned source"; exit 1; }
+            echo "$folder: matches its pinned source"
+          done <<< "$PINS"
+          # Every entry in `rust/`, hidden or not, is a pinned folder.
+          while read -r entry; do
+            printf '%s\n' "${pinned[@]}" | grep -qxF "$entry" \
+              || { echo "::error::$entry has no pin"; exit 1; }
+          done < <(find rust -mindepth 1 -maxdepth 1)
+      - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
+        with:
+          auto-config: "false"
+          build: "true"
+          build-args: "--wfail"
+          use-mathlib-cache: "true"
+          # Our own modules build in about a minute, and a cached build would skip the
+          # `#guard` tests; Mathlib's prebuilt files come from `lake exe cache get`.
+          use-github-cache: "false"
