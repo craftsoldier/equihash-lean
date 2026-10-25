@@ -436,9 +436,9 @@ def paramBlock (p : Params) : Array UInt64 :=
 /-- `Midstate::new`, as its loop bodies. -/
 theorem Midstate.new?_eq (p : Params) (input nonce : List ℕ) :
     Midstate.new? p input nonce =
-      (if input.length + nonce.length ≠ HEADER_BYTES + NONCE_BYTES then none else do
+      (if input.length + nonce.length ≠ HEADER_BYTES + NONCE_BYTES then some none else do
         let s ← forIn [input, nonce] (paramBlock p, List.replicate BLOCKBYTES 0, 0, 0) partPass
-        return {
+        return some {
           h := s.1
           m0 := u64FromLeBytes (s.2.1.take 8)
           m1Low := UInt64.ofNat (u32FromLeBytes ((s.2.1.drop 8).take 4))
@@ -560,7 +560,7 @@ theorem forIn_fillPass (h₀ : Array UInt64) (part : List ℕ) :
     first 128 bytes compressed into it, and the last 12 bytes kept for the final block. -/
 theorem Midstate.new?_spec (p : Params) (input nonce : List ℕ)
     (hlen : input.length + nonce.length = 140) :
-    ∃ ms, Midstate.new? p input nonce = some ms ∧
+    ∃ ms, Midstate.new? p input nonce = some (some ms) ∧
       ms.h = compressPrefixBlock (paramBlock p) ((input ++ nonce).take 128) (UInt64.ofNat 128) ∧
       ms.m0 = u64FromLeBytes ((((input ++ nonce).drop 128)).take 8) ∧
       ms.m1Low = UInt64.ofNat (u32FromLeBytes ((((input ++ nonce).drop 128).drop 8).take 4)) ∧
@@ -658,7 +658,7 @@ theorem take_map_range (f : ℕ → ℕ) (n : ℕ) (hn : n ≤ 64) :
     followed by `b`, personalized by `"ZcashPoW" ‖ n ‖ k`, zero-padded to 64 bytes. -/
 theorem leafHasher_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) (input nonce : List ℕ)
     (hin : Bytes input) (hnon : Bytes nonce) (hlen : input.length + nonce.length = 140) :
-    ∃ lh, LeafHasher.new? rp input nonce = some lh ∧
+    ∃ lh, LeafHasher.new? rp input nonce = some (some lh) ∧
       ∀ bs ds, ds.length = bs.length → (∀ d ∈ ds, d.length = 64) →
         lh.hash? bs ds = some (bs.map fun b =>
           Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
