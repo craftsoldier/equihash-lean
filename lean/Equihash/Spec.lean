@@ -1,7 +1,7 @@
 /-
 # Zcash Equihash Specification
 
-* Parameters and valid solutions (§7.7.1).
+* Parameters, valid solutions and their encoding (§7.7.1).
 * The hash values a solution is made of (§5.4.1.11).
 * Bytes and bits (§5.1, §5.2).
 -/
@@ -38,6 +38,10 @@ abbrev Bits := List Bool
 /-- `I2LEOSP_ℓ(x)` (§5.1): the `⌈ℓ/8⌉` bytes representing `x` in little-endian order. -/
 def I2LEOSP (ℓ x : ℕ) : List Byte :=
   (List.range ((ℓ + 7) / 8)).map fun j => BitVec.ofNat 8 (x / 256 ^ j)
+
+/-- `I2BEBSP_ℓ(x)` (§5.1): the `ℓ` bits representing `x` in big-endian order. -/
+def I2BEBSP (ℓ x : ℕ) : Bits :=
+  (List.range ℓ).map fun j => x.testBit (ℓ - 1 - j)
 
 /-- The bits of a byte sequence, each byte's most significant bit first.
 
@@ -159,5 +163,22 @@ structure ValidSolution (H : HashFn) (p : Params) (powheader : List Byte) (i : L
   birthday : GeneralizedBirthday H p powheader i
   collision : CollisionCondition H p powheader i
   ordering : OrderingCondition p i
+
+/-! ## The solution encoding (§7.7.1) -/
+
+/-- > An Equihash solution with `n = 200` and `k = 9` is encoded in the `solution` field of a
+    > block header as follows:
+    > `I2BEBSP_21(i_1 − 1) ‖ I2BEBSP_21(i_2 − 1) ‖ ⋯ ‖ I2BEBSP_21(i_512 − 1)`
+    >
+    > Recall from §5.2 that the bits in the above diagram are ordered from most to least
+    > significant in each byte.
+
+`solution` encodes `i` when its bits, each byte's most significant bit first, are those of
+the indices in turn.
+
+**Not stated in the specification.** The encoding for other parameters: each index in
+`n/(k+1) + 1` bits, which is 21 for `n = 200, k = 9`. -/
+def EncodesSolution (p : Params) (solution : List Byte) (i : List ℕ) : Prop :=
+  bitsOfBytes solution = i.flatMap fun j => I2BEBSP (p.digitBits + 1) (j - 1)
 
 end Equihash.Spec

@@ -1,9 +1,10 @@
 /-
-`src/minimal.rs`: expanding a byte array into fixed-width digits.
+`src/minimal.rs`: expanding a byte array into fixed-width digits, and decoding a minimally
+encoded solution into its indices.
 -/
 module
 
-public import Equihash.Verifier.Std
+public import Equihash.Verifier.Params
 
 @[expose] public section
 
@@ -53,5 +54,35 @@ def expandArrayInto? (vin : List ℕ) (bitLen bytePad : ℕ) (vout : List ℕ) :
 def expandArray? (vin : List ℕ) (bitLen bytePad : ℕ) : Option (List ℕ) :=
   let vout := List.replicate (expandedLen vin.length bitLen bytePad) 0
   expandArrayInto? vin bitLen bytePad vout
+
+/-- `read_u32_be` (lines 135–139): the next four bytes as a big-endian `u32`, and the advanced
+    cursor; `none` for `Err(UnexpectedEof)`. -/
+def readU32Be? (csr : Cursor) : Option (ℕ × Cursor) := do
+  let (n, csr) ← csr.readExact? 4
+  return (u32FromBeBytes n, csr)
+
+/-- `indices_from_minimal` (lines 142–163): the indices a minimally encoded solution holds,
+    each expanded to four big-endian bytes and read back; `none` for `None` (a solution of the
+    wrong length, or parameters whose length overflows) and where the Rust panics.
+
+`len_indices` only sizes the vector's capacity, which does not change the result. Computing it,
+`u32::BITS as usize * minimal.len()`, overflows, and `Vec::with_capacity` panics on a capacity
+over `isize::MAX` bytes, only for a `minimal` of `2^59` bytes or more. -/
+def indicesFromMinimal? (p : Params) (minimal : List ℕ) : Option (List ℕ) := do
+  let cBitLen := p.collisionBitLength
+  if minimal.length ≠ (← p.solutionBytes?) then
+    none
+  guard (divCeil (cBitLen + 1) 8 ≤ 4)
+  let bytePad := 4 - divCeil (cBitLen + 1) 8
+  let mut csr : Cursor := { inner := ← expandArray? minimal (cBitLen + 1) bytePad, pos := 0 }
+  let mut ret := []
+  -- `while let Ok(i) = read_u32_be(&mut csr)`
+  repeat
+    match readU32Be? csr with
+    | some (i, csr') =>
+      csr := csr'
+      ret := ret ++ [i]
+    | none => break
+  return ret
 
 end Equihash.Verifier

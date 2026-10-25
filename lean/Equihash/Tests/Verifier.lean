@@ -1,8 +1,10 @@
 /-
-The verifier on the test vectors of `zakura-equihash 4.0.0` (`src/test_vectors/valid.rs` and
-`src/test_vectors/invalid.rs`): it accepts every valid solution and rejects every invalid one.
+The verifiers on the test vectors of `zakura-equihash 4.0.0` (`src/test_vectors/valid.rs` and
+`src/test_vectors/invalid.rs`): the recursive one and the single-pass one agree, and accept every
+valid solution and reject every invalid one. Then `is_valid_solution` on the two real blocks
+of `Tests/Spec.lean` and the cases of the crate's own tests of it (`src/verify.rs`).
 -/
-import Equihash.Verifier.Verify
+import Equihash.Tests.Spec
 
 open Equihash.Verifier
 
@@ -12,188 +14,205 @@ def bytes (s : String) : List ℕ := s.toList.map Char.toNat
 /-- A 32-byte nonce: `b`, then zeros. -/
 def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
 
+/-- `validate_with_reference`'s closure (`src/verify.rs`, lines 391–399): each digest's first
+    bytes are the BLAKE2b hash of the block index, after `input` and `nonce`. -/
+def referenceHash (p : Params) (input nonce : List ℕ) :
+    List ℕ → List (List ℕ) → Option (List (List ℕ)) := fun blocks digests => do
+  let mut state ← initialiseState? p.n p.k p.hashOutput
+  state := state.update input
+  state := state.update nonce
+  return (blocks.zip digests).map fun (block, digest) =>
+    let hash := generateHash state block
+    hash ++ digest.drop hash.length
+
+/-- Both verifiers' answer, when they agree; `none` when they do not. -/
+def bothVerifiers (p : Params) (input nonce indices : List ℕ) : Option (Option Unit) :=
+  let recursive := isValidSolutionRecursive? p input nonce indices
+  if recursive = validateTree? p indices (referenceHash p input nonce) then some recursive
+  else none
+
 /-! ## Valid solutions -/
 
 -- `valid.rs`, lines 11–42.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [])
     [976, 126621, 100174, 123328, 38477, 105390, 38834, 90500, 6411, 116489, 51107, 129167, 25557,
      92292, 38525, 56514, 1110, 98024, 15426, 74455, 3185, 84007, 24328, 36473, 17427, 129451,
      27556, 119967, 31704, 62448, 110460, 117894]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [])
     [1008, 18280, 34711, 57439, 3903, 104059, 81195, 95931, 58336, 118687, 67931, 123026, 64235,
      95595, 84355, 122946, 8131, 88988, 45130, 58986, 59899, 78278, 94769, 118158, 25569, 106598,
      44224, 96285, 54009, 67246, 85039, 127667]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [])
     [1278, 107636, 80519, 127719, 19716, 130440, 83752, 121810, 15337, 106305, 96940, 117036, 46903,
      101115, 82294, 118709, 4915, 70826, 40826, 79883, 37902, 95324, 101092, 112254, 15536, 68760,
      68493, 125640, 67620, 108562, 68035, 93430]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [])
     [3976, 108868, 80426, 109742, 33354, 55962, 68338, 80112, 26648, 28006, 64679, 130709, 41182,
      126811, 56563, 129040, 4013, 80357, 38063, 91241, 30768, 72264, 97338, 124455, 5607, 36901,
      67672, 87377, 17841, 66985, 77087, 85291]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [])
     [5970, 21862, 34861, 102517, 11849, 104563, 91620, 110653, 7619, 52100, 21162, 112513, 74964,
      79553, 105558, 127256, 21905, 112672, 81803, 92086, 43695, 97911, 66587, 104119, 29017, 61613,
      97690, 106345, 47428, 98460, 53655, 109002]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 43–55.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [1])
     [1911, 96020, 94086, 96830, 7895, 51522, 56142, 62444, 15441, 100732, 48983, 64776, 27781,
      85932, 101138, 114362, 4497, 14199, 36249, 41817, 23995, 93888, 35798, 96337, 5530, 82377,
      66438, 85247, 39332, 78978, 83015, 123505]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 56–68.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [2])
     [165, 27290, 87424, 123403, 5344, 35125, 49154, 108221, 8882, 90328, 77359, 92348, 54692, 81690,
      115200, 121929, 18968, 122421, 32882, 128517, 56629, 88083, 88022, 102461, 35665, 62833, 95988,
      114502, 39965, 119818, 45010, 94889]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 69–88.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [10])
     [1855, 37525, 81472, 112062, 11831, 38873, 45382, 82417, 11571, 47965, 71385, 119369, 13049,
      64810, 26995, 34659, 6423, 67533, 88972, 105540, 30672, 80244, 39493, 94598, 17858, 78496,
      35376, 118645, 50186, 51838, 70421, 103703]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [10])
     [3671, 125813, 31502, 78587, 25500, 83138, 74685, 98796, 8873, 119842, 21142, 55332, 25571,
      122204, 31433, 80719, 3955, 49477, 4225, 129562, 11837, 21530, 75841, 120644, 4653, 101217,
      19230, 113175, 16322, 24384, 21271, 96965]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 89–101.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "block header") (nonce [11])
     [2570, 20946, 61727, 130667, 16426, 62291, 107177, 112384, 18464, 125099, 120313, 127545, 35035,
      73082, 118591, 120800, 13800, 32837, 23607, 86516, 17339, 114578, 22053, 85510, 14913, 42826,
      25168, 121262, 33673, 114773, 77592, 83471]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 102–118.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [])
     [3130, 83179, 30454, 107686, 71240, 88412, 109700, 114639, 10024, 32706, 38019, 113013, 18399,
      92942, 21094, 112263, 4146, 30807, 10631, 73192, 22216, 90216, 45581, 125042, 11256, 119455,
      93603, 110112, 59851, 91545, 97403, 111102]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [])
     [3822, 35317, 47508, 119823, 37652, 117039, 69087, 72058, 13147, 111794, 65435, 124256, 22247,
      66272, 30298, 108956, 13157, 109175, 37574, 50978, 31258, 91519, 52568, 107874, 14999, 103687,
      27027, 109468, 36918, 109660, 42196, 100424]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 119–138.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 69567, 114474, 104973, 122568]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [16700, 46276, 21232, 43153, 22398, 58511, 47922, 71816, 23370, 26222, 39248, 40137, 65375,
      85794, 69749, 73259, 23599, 72821, 42250, 52383, 35267, 75893, 52152, 57181, 27137, 101117,
      45804, 92838, 29548, 29574, 37737, 113624]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 139–151.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [2])
     [6005, 59843, 55560, 70361, 39140, 77856, 44238, 57702, 32125, 121969, 108032, 116542, 37925,
      75404, 48671, 111682, 6937, 93582, 53272, 77545, 13715, 40867, 73187, 77853, 7348, 70313,
      24935, 24978, 25967, 41062, 58694, 110036]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 152–181.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [10])
     [968, 90691, 70664, 112581, 17233, 79239, 66772, 92199, 27801, 44198, 58712, 122292, 28227,
      126747, 70925, 118108, 2876, 76082, 39335, 113764, 26643, 60579, 50853, 70300, 19640, 31848,
      28672, 87870, 33574, 50308, 40291, 61593]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [10])
     [1181, 61261, 75793, 96302, 36209, 113590, 79236, 108781, 8275, 106510, 11877, 74550, 45593,
      80595, 71247, 95783, 2991, 99117, 56413, 71287, 10235, 68286, 22016, 104685, 51588, 53344,
      56822, 63386, 63527, 75772, 93100, 108542]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [10])
     [2229, 30387, 14573, 115700, 20018, 124283, 84929, 91944, 26341, 64220, 69433, 82466, 29778,
      101161, 59334, 79798, 2533, 104985, 50731, 111094, 10619, 80909, 15555, 119911, 29028, 42966,
      51958, 86784, 34561, 97709, 77126, 127250]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [10])
     [15465, 59017, 93851, 112478, 24940, 128791, 26154, 107289, 24050, 78626, 51948, 111573, 35117,
      113754, 36317, 67606, 21508, 91486, 28293, 126983, 23989, 39722, 60567, 97243, 26720, 56243,
      60444, 107530, 40329, 56467, 91943, 93737]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 182–194.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [11])
     [1120, 77433, 58243, 76860, 11411, 96068, 13150, 35878, 15049, 88928, 20101, 104706, 29215,
      73328, 39498, 83529, 9233, 124174, 66731, 97423, 10823, 92444, 25647, 127742, 12207, 46292,
      22018, 120758, 14411, 46485, 21828, 57591]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 195–234.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [1162, 129543, 57488, 82745, 18311, 115612, 20603, 112899, 5635, 103373, 101651, 125986, 52160,
      70847, 65152, 101720, 5810, 43165, 64589, 105333, 11347, 63836, 55495, 96392, 40767, 81019,
      53976, 94184, 41650, 114374, 45109, 57038]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [2321, 121781, 36792, 51959, 21685, 67596, 27992, 59307, 13462, 118550, 37537, 55849, 48994,
      58515, 78703, 100100, 11189, 98120, 45242, 116128, 33260, 47351, 61550, 116649, 11927, 20590,
      35907, 107966, 28779, 57407, 54793, 104108]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [2321, 121781, 36792, 51959, 21685, 67596, 27992, 59307, 13462, 118550, 37537, 55849, 48994,
      78703, 58515, 100100, 11189, 98120, 45242, 116128, 33260, 47351, 61550, 116649, 11927, 20590,
      35907, 107966, 28779, 57407, 54793, 104108]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [2321, 121781, 36792, 51959, 21685, 67596, 27992, 59307, 13462, 118550, 37537, 55849, 48994,
      100100, 58515, 78703, 11189, 98120, 45242, 116128, 33260, 47351, 61550, 116649, 11927, 20590,
      35907, 107966, 28779, 57407, 54793, 104108]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [4488, 83544, 24912, 62564, 43206, 62790, 68462, 125162, 6805, 8886, 46937, 54588, 15509,
      126232, 19426, 27845, 5959, 56839, 38806, 102580, 11255, 63258, 23442, 39750, 13022, 22271,
      24110, 52077, 17422, 124996, 35725, 101509]
-  = some ()
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Test case with 3+-way collision in the final round.") (nonce [240, 7])
     [8144, 33053, 33933, 77498, 21356, 110495, 42805, 116575, 27360, 48574, 100682, 102629, 50754,
      64608, 96899, 120978, 11924, 74422, 49240, 106822, 12787, 68290, 44314, 50005, 38056, 49716,
      83299, 95307, 41798, 82309, 94504, 96161]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 235–293.
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [])
     [4313, 223176, 448870, 1692641, 214911, 551567, 1696002, 1768726, 500589, 938660, 724628,
      1319625, 632093, 1474613, 665376, 1222606, 244013, 528281, 1741992, 1779660, 313314, 996273,
@@ -242,10 +261,10 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      1095925, 1149690, 1318422, 361557, 1376579, 1587551, 1715060, 1224593, 1581980, 1354420,
      1850496, 151947, 748306, 1987121, 2070676, 273794, 981619, 683206, 1485056, 766481, 2047708,
      930443, 2040726, 1136227, 1945705, 1722044, 1971986]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 294–416.
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [1])
     [1505, 1380774, 200806, 1787044, 101056, 1697952, 281464, 374899, 263712, 1532496, 264180,
      637056, 734225, 1882676, 1112004, 2093109, 193394, 1459136, 525171, 657480, 214528, 1221365,
@@ -294,8 +313,8 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      1297857, 921334, 1259083, 1440074, 1939366, 232907, 747213, 1349009, 1945364, 689906, 1116453,
      1904207, 1916192, 229793, 1576982, 1420059, 1644978, 278248, 2024807, 297914, 419798, 555747,
      712605, 1012424, 1428921, 890113, 1822645, 1082368, 1392894]
-  = some ()
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+  = some (some ())
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [1])
     [13396, 1502141, 934546, 1419227, 445798, 1676403, 643830, 1421927, 45286, 1160795, 117864,
      542369, 501065, 1834465, 544881, 1258964, 157233, 888851, 1707333, 2042954, 1067373, 1959382,
@@ -344,10 +363,10 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      355992, 231384, 1712830, 380050, 1531904, 205155, 785766, 794141, 1821460, 536969, 826105,
      915018, 1727720, 473495, 575484, 1511034, 1752204, 1030559, 1173930, 1566670, 1684100, 545434,
      1644431, 838096, 1830099, 714438, 1058571, 986457, 1275490]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 417–538.
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [2])
     [85, 2041581, 739509, 1038120, 95814, 1449199, 566808, 1970271, 22351, 1033277, 351539, 378679,
      370613, 1217658, 744902, 2054863, 128384, 2048133, 1422405, 1711301, 266020, 338919, 1851784,
@@ -396,8 +415,8 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      1235157, 189041, 1855656, 597803, 1251423, 472775, 1688197, 1286637, 1760949, 930937, 1072689,
      1187497, 1784673, 58620, 1436417, 146777, 1677387, 66982, 746844, 945993, 1703252, 347963,
      945075, 445864, 1694069, 946355, 1646534, 1769893, 1806674]
-  = some ()
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+  = some (some ())
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [2])
     [2280, 1675737, 1241864, 1426081, 529325, 1356538, 1546188, 2018466, 113218, 1885133, 750288,
      1896938, 785567, 802607, 1597047, 1985969, 132292, 1612427, 551147, 1732380, 1140541, 1246254,
@@ -446,10 +465,10 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      425058, 1408729, 552440, 908024, 536460, 1031151, 1355099, 1690286, 758818, 965662, 1568718,
      1811172, 394608, 1421319, 528521, 983018, 1098180, 2033658, 1555936, 2016847, 558752, 1627758,
      1319354, 1973293, 844477, 2092434, 1252290, 1572207]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 539–662.
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [10])
     [4864, 1199590, 193812, 1249880, 714671, 1837456, 1535571, 1708457, 232772, 1454167, 457525,
      637002, 332079, 1501386, 718273, 1615866, 77066, 484710, 167020, 1302858, 478350, 1147611,
@@ -498,8 +517,8 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      1270708, 2001104, 231117, 1687963, 581051, 755823, 150994, 201680, 277505, 1571629, 210684,
      267883, 346662, 1369722, 210410, 450237, 889519, 1927159, 428761, 1261947, 1112506, 2072336,
      328126, 919149, 422720, 523141, 480263, 948885, 888698, 1228888]
-  = some ()
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+  = some (some ())
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [10])
     [23901, 617413, 355244, 1975506, 132019, 973669, 1226248, 1573681, 122421, 1065428, 582124,
      909665, 558651, 1926639, 991115, 1811101, 53484, 471380, 1166430, 1172099, 768898, 1980136,
@@ -548,10 +567,10 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      839298, 474427, 1831684, 210231, 1370197, 1261151, 1816924, 329886, 699000, 372746, 1891547,
      671945, 1301809, 873541, 1034843, 377922, 680790, 1280670, 1510355, 771245, 1966090, 1483940,
      2001054, 426637, 1257587, 815969, 1277447, 631165, 722596, 1283260, 1948358]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 663–724.
-#guard isValidSolutionRecursive? ⟨200, 9⟩
+#guard bothVerifiers ⟨200, 9⟩
     (bytes "block header") (nonce [11])
     [4069, 463738, 457648, 1094395, 353041, 845577, 1338264, 1960371, 269620, 856637, 560213,
      877722, 450359, 826410, 714399, 1983540, 126148, 1080255, 1138998, 1761600, 427345, 1932802,
@@ -600,182 +619,240 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
      1600412, 412477, 2062451, 130962, 2053156, 465929, 709254, 117855, 1392948, 136673, 374064,
      121591, 1688669, 846029, 994804, 675059, 1448777, 1045103, 1240057, 816462, 1499323, 1890697,
      1896908, 826192, 959241, 833980, 1301853, 1149691, 1227108, 1164702, 1520364]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 725–749.
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [])
     [592534, 16727887, 7453057, 25925862, 3112444, 22940957, 11281555, 31775301, 1334223, 20443726,
      11070438, 27290152, 4163350, 8213747, 9315696, 19739115, 1204738, 23545872, 1776094, 13506389,
      6697536, 27749507, 11388567, 14622750, 4026870, 14622947, 8538779, 27133048, 11652285,
      21221152, 22429643, 26529065]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [])
     [893099, 8838806, 28398733, 31357275, 16596368, 25123776, 18326148, 31682454, 924167, 27761424,
      20546064, 30880786, 2931034, 11343701, 17011529, 26876917, 4915668, 8097132, 17630254,
      19828133, 5205703, 15014329, 13248799, 31182371, 7887075, 22909946, 28758238, 31473391,
      14791659, 33348545, 23436578, 26267836]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [])
     [1948823, 6927010, 5051182, 16853572, 7567151, 8174004, 9697548, 30082354, 4126978, 11219458,
      12046931, 26296269, 6960990, 7513282, 15641819, 29553952, 2075509, 3917596, 26506206, 32423116,
      20172796, 26046597, 21008102, 32605968, 7733247, 28951159, 19401173, 22240259, 12527355,
      25816053, 26924563, 30167801]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 750–789.
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [1])
     [370176, 12908777, 1114179, 27164301, 6258700, 25604518, 23849263, 25098550, 3874837, 22260519,
      6421829, 20746376, 9010370, 14958301, 11701370, 20286183, 3453033, 22917202, 17399732,
      25201320, 12365907, 25599116, 12861876, 16581537, 6291684, 17504753, 17494629, 17928408,
      10119629, 10615318, 17868827, 20213583]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [1])
     [582263, 3783052, 2313999, 19478261, 1954747, 14513744, 5696384, 9983371, 770696, 25399708,
      2469656, 31060031, 1409486, 25011708, 6197016, 24800042, 4526208, 20923264, 22532911, 24458988,
      19054856, 19620962, 21223763, 25258694, 5339436, 15681349, 11143785, 21451088, 8434833,
      30577236, 27811311, 32663733]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [1])
     [635733, 25222820, 21014930, 29574076, 1000985, 5604521, 6974734, 19935829, 3041402, 6498908,
      27180330, 29522758, 3065872, 28403257, 5814381, 33337207, 1920304, 16178841, 24948948,
      25474220, 14568607, 30131615, 16282584, 28097350, 6277286, 20609353, 13688741, 20448955,
      8669674, 28133172, 18969419, 33014245]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [1])
     [1784595, 8730569, 2952232, 8311088, 3848398, 24535350, 6741302, 15864803, 5653320, 16018355,
      17835034, 29486303, 5823367, 20140719, 7233264, 33483182, 3117353, 20053611, 3338894, 15846604,
      7165521, 28162236, 8412349, 11018248, 7341551, 18365873, 16351743, 22192468, 8662075, 9732645,
      14238971, 22027130]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [1])
     [1791926, 8318711, 26251202, 32356717, 6997365, 25735638, 21576954, 30111878, 3898334, 19905391,
      5033991, 16030336, 5245813, 26522082, 5669465, 16635645, 8277609, 22422842, 13069153, 29511907,
      20365907, 23921315, 24326546, 32342867, 12058103, 23466254, 19021516, 19329156, 15273796,
      15658582, 15782868, 30953403]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 790–817.
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [2])
     [631838, 32379030, 12115828, 15370934, 1071098, 28542374, 3749356, 23094728, 1030877, 4102154,
      3296262, 16677836, 7373429, 23553272, 13706818, 22718294, 1600870, 2009968, 24236940, 26722391,
      3296672, 30961726, 8361013, 20154770, 3094572, 28709268, 6668495, 32281682, 11480232, 24080407,
      21721486, 26351116]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [2])
     [2024468, 30788885, 16549044, 31105157, 10766172, 27803398, 14188383, 18350597, 8340166,
      12112117, 9771703, 16475394, 15638163, 19852515, 16164133, 21283881, 3012382, 10164383,
      4371003, 27267590, 4579840, 32997246, 17142413, 27563106, 4959833, 19397820, 7489484, 26132602,
      7957443, 27721944, 26669199, 27861139]
-  = some ()
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+  = some (some ())
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [2])
     [5378620, 10759970, 17807788, 29226493, 11529006, 22674062, 17704747, 23436136, 10872275,
      25829134, 15459988, 21678082, 17603136, 22657822, 22774669, 23569569, 6492083, 20372131,
      27398382, 33053456, 21986403, 23346432, 29327458, 33052852, 13637567, 26765408, 26834306,
      29589598, 17363888, 31088383, 17860587, 20580709]
-  = some ()
+  = some (some ())
 
 -- `valid.rs`, lines 818–826.
 
 -- `valid.rs`, lines 827–840.
-#guard isValidSolutionRecursive? ⟨144, 5⟩
+#guard bothVerifiers ⟨144, 5⟩
     (bytes "block header") (nonce [11])
     [911662, 22138389, 8210265, 31274530, 8029780, 20878462, 18256796, 24246891, 1935509, 22500647,
      18385714, 21573406, 5314654, 11279996, 7578895, 12470048, 3573289, 16335834, 8230824, 25830081,
      4414521, 7228234, 20359437, 21115537, 11102213, 12353678, 19277545, 26893604, 13111251,
      30773720, 14408826, 26047501]
-  = some ()
+  = some (some ())
 
 /-! ## Invalid solutions -/
 
 -- Change one index.
 -- `invalid.rs`, lines 19–32; the Rust returns `Err(Collision)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2262, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 69567, 114474, 104973, 122568]
-  = none
+  = some none
 
 -- Swap two arbitrary indices.
 -- `invalid.rs`, lines 34–47; the Rust returns `Err(Collision)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [45858, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 2261,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 69567, 114474, 104973, 122568]
-  = none
+  = some none
 
 -- Reverse the first pair of indices.
 -- `invalid.rs`, lines 49–62; the Rust returns `Err(OutOfOrder)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [15185, 2261, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 69567, 114474, 104973, 122568]
-  = none
+  = some none
 
 -- Swap the first and second pairs of indices.
 -- `invalid.rs`, lines 64–77; the Rust returns `Err(OutOfOrder)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [36112, 104243, 2261, 15185, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 69567, 114474, 104973, 122568]
-  = none
+  = some none
 
 -- Swap the second-to-last and last pairs of indices.
 -- `invalid.rs`, lines 79–92; the Rust returns `Err(OutOfOrder)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807,
      52426, 80391, 104973, 122568, 69567, 114474]
-  = none
+  = some none
 
 -- Swap the first half and second half.
 -- `invalid.rs`, lines 94–107; the Rust returns `Err(OutOfOrder)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [15972, 115059, 85191, 90330, 68190, 122819, 81830, 91132, 23460, 49807, 52426, 80391, 69567,
      114474, 104973, 122568, 2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642,
      69878, 76925, 80080, 45858, 116805, 92842, 111026]
-  = none
+  = some none
 
 -- Sort the indices.
 -- `invalid.rs`, lines 109–122; the Rust returns `Err(Collision)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2261, 15185, 15972, 23460, 23779, 32642, 36112, 45858, 49807, 52426, 68190, 69567, 69878,
      76925, 80080, 80391, 81830, 85191, 90330, 91132, 92842, 104243, 104973, 111026, 114474, 115059,
      116805, 118332, 118390, 122568, 122819, 130041]
-  = none
+  = some none
 
 -- Duplicate indices.
 -- `invalid.rs`, lines 124–137; the Rust returns `Err(DuplicateIdxs)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2261, 2261, 15185, 15185, 36112, 36112, 104243, 104243, 23779, 23779, 118390, 118390, 118332,
      118332, 130041, 130041, 32642, 32642, 69878, 69878, 76925, 76925, 80080, 80080, 45858, 45858,
      116805, 116805, 92842, 92842, 111026, 111026]
-  = none
+  = some none
 
 -- Duplicate first half.
 -- `invalid.rs`, lines 139–152; the Rust returns `Err(DuplicateIdxs)`.
-#guard isValidSolutionRecursive? ⟨96, 5⟩
+#guard bothVerifiers ⟨96, 5⟩
     (bytes "Equihash is an asymmetric PoW based on the Generalised Birthday problem.") (nonce [1])
     [2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878, 76925, 80080, 45858,
      116805, 92842, 111026, 2261, 15185, 36112, 104243, 23779, 118390, 118332, 130041, 32642, 69878,
      76925, 80080, 45858, 116805, 92842, 111026]
-  = none
+  = some none
+
+/-! ## `is_valid_solution` -/
+
+-- `mainnet_block_415000` (`src/verify.rs`, lines 476–496): valid; still valid with the whole
+-- 140-byte prefix as `input`; a changed nonce is rejected.
+#guard isValidSolution? 200 9 blockHeader blockNonce solution = some ()
+#guard isValidSolution? 200 9 (blockHeader ++ blockNonce) [] solution = some ()
+#guard isValidSolution? 200 9 blockHeader (blockNonce.set 31 (blockNonce[31]! ^^^ 1)) solution =
+  none
+
+-- `regtest_genesis` (lines 499–527): valid; rejected with any one bit of the solution or the
+-- nonce flipped; rejected with mainnet parameters.
+#guard isValidSolution? 48 5 regtestHeader regtestNonce regtestSolution = some ()
+#guard (List.range (regtestSolution.length * 8)).all fun i =>
+  isValidSolution? 48 5 regtestHeader regtestNonce
+    (regtestSolution.set (i / 8) (regtestSolution[i / 8]! ^^^ 1 <<< (i % 8))) == none
+#guard (List.range (regtestNonce.length * 8)).all fun i =>
+  isValidSolution? 48 5 regtestHeader
+    (regtestNonce.set (i / 8) (regtestNonce[i / 8]! ^^^ 1 <<< (i % 8))) regtestSolution == none
+#guard isValidSolution? 200 9 regtestHeader regtestNonce regtestSolution = none
+
+-- `rejects_unsupported_parameters` (lines 530–594): what `Params::new` rejects and accepts;
+-- rejected parameters with an empty and a one-byte solution; `(264, 32)`, whose `2^32` leaves are
+-- counted, not wrapped; and `(512, 63)`, whose solution length overflows.
+#guard [(520, 64), (1024, 3), (48, 7), (200, 7), (104, 3), (448, 63),
+    (134217736, 16777216)].all fun (n, k) => (Params.new? n k).isNone
+#guard [(200, 9), (48, 5), (96, 5), (144, 5), (96, 3), (512, 63)].all fun (n, k) =>
+  (Params.new? n k).isSome
+#guard [(448, 63), (134217736, 16777216)].all fun (n, k) =>
+  [[], [0]].all fun soln => isValidSolution? n k blockHeader blockNonce soln == none
+#guard (Params.new? 264 32).isSome
+#guard Params.solutionIndices? ⟨264, 32⟩ = some (2 ^ 32)
+#guard isValidSolution? 264 32 blockHeader blockNonce [0] = none
+#guard Params.solutionBytes? ⟨512, 63⟩ = none
+#guard isValidSolution? 512 63 blockHeader blockNonce (List.replicate 9 0) = none
+
+-- `validate_tree_rejects_wrong_leaf_counts` (lines 597–607).
+#guard [0, 1, 511, 513].all fun leaves =>
+  validateTree? ⟨200, 9⟩ (List.range leaves)
+    (fun _ ds => some (ds.map fun _ => List.replicate 64 0)) == none
+
+-- `rejects_other_input_lengths` (lines 627–653): other prefix lengths; with no prefix, other
+-- parameters and a solution one byte short.
+#guard isValidSolution? 200 9 (blockHeader.take 107) blockNonce solution = none
+#guard isValidSolution? 200 9 blockHeader (blockNonce.take 31) solution = none
+#guard isValidSolution? 200 9 (blockHeader ++ [0]) blockNonce solution = none
+#guard isValidSolution? 200 9 [] [] solution = none
+#guard isValidSolution? 200 8 [] [] solution = none
+#guard isValidSolution? 200 9 [] [] solution.tail = none
+
+-- The leaf hasher on the 140-byte prefix: the digests of the reference closure, for blocks from
+-- the first to the last one a `(200, 9)` solution can name.
+#guard (do
+  let lh ← LeafHasher.new? ⟨200, 9⟩ blockHeader blockNonce
+  let blocks := [0, 1, 2, 1000, 524287]
+  let digests := List.replicate blocks.length (List.replicate 64 0)
+  return (← lh.hash? blocks digests) ==
+    (← referenceHash ⟨200, 9⟩ blockHeader blockNonce blocks digests)) = some true
 

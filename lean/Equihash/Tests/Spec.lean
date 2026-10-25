@@ -1,9 +1,11 @@
 /-
-The specification on Zcash mainnet block 415000 (`zakura-equihash 4.0.0`,
-`src/test_vectors/zcash.rs`, lines 5–44): its solution is valid.
+The specification on two real blocks (`zakura-equihash 4.0.0`, `src/test_vectors/zcash.rs`):
+Zcash mainnet block 415000 (lines 5–44, `n = 200, k = 9`) and the Regtest genesis block
+(lines 50–61, `n = 48, k = 5`). Each solution is valid, and its bytes are its encoding.
 
 §5.4.1.11 takes bits of the BLAKE2b output without saying in which order; `Spec.lean` reads
-each byte most significant bit first. The block is valid read that way, and not the other.
+each byte most significant bit first. The mainnet block is valid read that way, and not the
+other.
 -/
 import Equihash
 
@@ -30,30 +32,41 @@ instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List ℕ) :
       GeneralizedBirthday H p S i ∧ CollisionCondition H p S i ∧ OrderingCondition p i)
     ⟨fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩, fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩⟩
 
-/-! ## The block -/
+instance (p : Spec.Params) (s : List Byte) (i : List ℕ) : Decidable (EncodesSolution p s i) := by
+  unfold EncodesSolution; infer_instance
+
+/-! ## The blocks -/
 
 /-- The bytes a hexadecimal string denotes. -/
 def hex (s : String) : List ℕ :=
   let digits := s.toList.map fun c => (Char.toNat c - if c ≤ '9' then 48 else 87)
   (List.range (digits.length / 2)).map fun i => 16 * digits[2 * i]! + digits[2 * i + 1]!
 
-/-- The solution's indices: `I2BEBSP_21(i_j − 1)` for each, most significant bit first
-    (§7.7.1). -/
-def indicesOf (solution : List ℕ) : List ℕ :=
+/-- The `m` indices a solution holds, `w` bits each (`I2BEBSP_w(i_j − 1)`), most significant
+    bit first (§7.7.1). -/
+def indicesOf (w m : ℕ) (solution : List ℕ) : List ℕ :=
   let bits := solution.flatMap fun b => (List.range 8).map fun j => b / 2 ^ (7 - j) % 2
-  (List.range 512).map fun j => ((bits.drop (21 * j)).take 21).foldl (2 * · + ·) 0 + 1
+  (List.range m).map fun j => ((bits.drop (w * j)).take w).foldl (2 * · + ·) 0 + 1
 
 /-- Zcash's parameters: `n = 200`, `k = 9`. -/
 def zcash : Spec.Params := ⟨200, 9, by decide, by decide, by decide, by decide, by decide⟩
 
-/-- The block header up to the nonce, then the nonce. -/
-def powheader : List Byte := bytesOf (hex (String.join [
+/-- Regtest's parameters: `n = 48`, `k = 5`. -/
+def regtest : Spec.Params := ⟨48, 5, by decide, by decide, by decide, by decide, by decide⟩
+
+/-- Mainnet block 415000's header up to the nonce (lines 5–9). -/
+def blockHeader : List ℕ := hex (String.join [
     "040000005274b43b9e4ad8f43e93f78463d24dcfe531aeb4719819f4f97f7e0300000000663073bc4bfa95c9",
     "bec36aad7268a573049797bdfc5aa4c743fbe4820aa393ce0000000000000000000000000000000000000000",
-    "000000000000000000000000a8becc5be1ab031c"]) ++
-  hex "c2fd607c776a7a0000000000000000000000000000000000000000003eb21819")
+    "000000000000000000000000a8becc5be1ab031c"])
 
-/-- The block's solution, minimally encoded. -/
+/-- Its nonce (lines 11–12). -/
+def blockNonce : List ℕ := hex "c2fd607c776a7a0000000000000000000000000000000000000000003eb21819"
+
+/-- The block header up to the nonce, then the nonce. -/
+def powheader : List Byte := bytesOf (blockHeader ++ blockNonce)
+
+/-- The block's solution, minimally encoded (lines 15–44). -/
 def solution : List ℕ := hex (String.join [
     "00949d55de0cc633e0cce41e4649ef4aa3349f0100290ffe281b947b3b53fbd2f35b1ce292649b96ac6e0883",
     "af3a6844b95592e74556da344b4701961cd4130c68219cfa1341d5afb5049eb0e8be4a2d92d678c40785e337",
@@ -87,10 +100,36 @@ def solution : List ℕ := hex (String.join [
     "42d22e18534c4e0efabb2d1525dc4858b9b0f77d474a125ebc250e08fedbfaa66f453d90932cab3ff4522190",
     "9968e51e6bc254d509adeb75cba76d48fe024e3e66d8df5e"])
 
+/-- The Regtest genesis header up to the nonce (lines 50–54). -/
+def regtestHeader : List ℕ := hex (String.join [
+    "040000000000000000000000000000000000000000000000000000000000000000000000db4d7a85b768123f",
+    "1dff1d4c4cece70083b2d27e117b4ac2e31d087988a5eac40000000000000000000000000000000000000000",
+    "000000000000000000000000dae5494d0f0f0f20"])
+
+/-- Its nonce (lines 56–57). -/
+def regtestNonce : List ℕ := hex "0900000000000000000000000000000000000000000000000000000000000000"
+
+/-- Its solution, minimally encoded (lines 59–61). -/
+def regtestSolution : List ℕ :=
+  hex "01936b7db1eb4ac39f151b8704642d0a8bda13ec547d54cd5e43ba142fc6d8877cab07b3"
+
 /-! ## The checks -/
 
 -- Valid, reading BLAKE2b's output most significant bit first, as `Spec.lean` does.
-#guard decide (ValidSolution Blake2b.hashFn zcash powheader (indicesOf solution))
+#guard decide (ValidSolution Blake2b.hashFn zcash powheader (indicesOf 21 512 solution))
+
+-- Its bytes are the encoding of its indices.
+#guard decide (EncodesSolution zcash (bytesOf solution) (indicesOf 21 512 solution))
+
+-- The Regtest genesis block: valid, and its bytes are its encoding.
+#guard decide (ValidSolution Blake2b.hashFn regtest (bytesOf (regtestHeader ++ regtestNonce))
+  (indicesOf 9 32 regtestSolution))
+#guard decide (EncodesSolution regtest (bytesOf regtestSolution) (indicesOf 9 32 regtestSolution))
+
+-- §7.7.1's own example: indices beginning `69, 42, 2^21` encode to bytes beginning
+-- `0, 2, 32, 0, 10, 127, 255`.
+#guard bitsOfBytes (bytesOf [0, 2, 32, 0, 10, 127, 255]) =
+  ([69, 42, 2 ^ 21].flatMap fun j => I2BEBSP 21 (j - 1)).take 56
 
 /-- Byte `b` with its bits reversed. -/
 def reverseBits (b : ℕ) : ℕ := (List.range 8).foldl (fun acc j => 2 * acc + b / 2 ^ j % 2) 0
@@ -101,4 +140,4 @@ def leastSignificantFirst : HashFn := fun p x =>
   (Blake2b.hashFn p x).map fun b => BitVec.ofNat 8 (reverseBits b.toNat)
 
 -- Not valid, reading it least significant bit first.
-#guard !decide (ValidSolution leastSignificantFirst zcash powheader (indicesOf solution))
+#guard !decide (ValidSolution leastSignificantFirst zcash powheader (indicesOf 21 512 solution))

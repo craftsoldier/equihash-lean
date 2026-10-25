@@ -17,6 +17,13 @@ structure Params where
 
 namespace Params
 
+/-- `Params::new` (lines 9–30): the parameters, when they are ones the verifier supports. -/
+def new? (n k : ℕ) : Option Params :=
+  if n % 8 = 0 ∧ k ≥ 3 ∧ k < n ∧ n % (k + 1) = 0 ∧ n ≤ 512 ∧
+      8 ≤ n / (k + 1) ∧ n / (k + 1) ≤ 24 then
+    some { n, k }
+  else none
+
 variable (self : Params)
 
 /-- `indices_per_hash_output` (lines 45–47): `512 / self.n`. -/
@@ -30,6 +37,19 @@ def collisionBitLength : ℕ := self.n / (self.k + 1)
 
 /-- `collision_byte_length` (lines 54–56): `self.collision_bit_length().div_ceil(8)`. -/
 def collisionByteLength : ℕ := divCeil self.collisionBitLength 8
+
+/-- `hash_length` (lines 57–59): `((self.k as usize) + 1) * self.collision_byte_length()`. -/
+def hashLength : ℕ := (self.k + 1) * self.collisionByteLength
+
+/-- `solution_indices` (lines 32–34): `1usize.checked_shl(self.k)`. -/
+def solutionIndices? : Option ℕ := checkedShl? 1 self.k
+
+/-- `solution_bytes` (lines 37–44):
+    `self.solution_indices()?.checked_mul(self.collision_bit_length() + 1)? / 8`. -/
+def solutionBytes? : Option ℕ := do
+  let indices ← self.solutionIndices?
+  let bits ← checkedMul? indices (self.collisionBitLength + 1)
+  return bits / 8
 
 end Params
 

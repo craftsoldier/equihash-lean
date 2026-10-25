@@ -10,3 +10,4 @@ module
 public import Equihash.Spec
 public import Equihash.Verifier.Verify
 public import Equihash.Proofs.Verify
+public import Equihash.Proofs.Solution
