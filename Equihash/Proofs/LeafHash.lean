@@ -4,6 +4,7 @@ The portable leaf hasher computes BLAKE2b: each leaf digest of `LeafHasher` is t
 -/
 module
 
+public import Equihash.Verifier.LeafHash
 public import Equihash.Proofs.Decode
 public import Mathlib.Tactic.IntervalCases
 

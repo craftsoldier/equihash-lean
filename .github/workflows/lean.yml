@@ -6,7 +6,7 @@ on:
   pull_request:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions: {}
@@ -41,13 +41,15 @@ jobs:
             case "$kind" in
               crates)
                 name=$a version=$b sha=$c
-                case ${#name} in
+                # Index paths are lowercase.
+                lower=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')
+                case ${#lower} in
                   1) prefix=1 ;;
                   2) prefix=2 ;;
-                  3) prefix=3/${name:0:1} ;;
-                  *) prefix=${name:0:2}/${name:2:2} ;;
+                  3) prefix=3/${lower:0:1} ;;
+                  *) prefix=${lower:0:2}/${lower:2:2} ;;
                 esac
-                indexed=$(curl -sSfL "https://index.crates.io/$prefix/$name" \
+                indexed=$(curl -sSfL "https://index.crates.io/$prefix/$lower" \
                   | jq -r --arg v "$version" 'select(.vers == $v) | .cksum')
                 [ "$indexed" = "$sha" ] \
                   || { echo "::error::$name $version: index checksum $indexed, pinned $sha"; exit 1; }
@@ -59,11 +61,16 @@ jobs:
                 ;;
               git)
                 repository=$a commit=$b directory=$c
-                git init -q "$tmp/repo"
-                git -C "$tmp/repo" fetch -q --depth 1 "$repository" "$commit"
-                [ "$(git -C "$tmp/repo" rev-parse FETCH_HEAD)" = "$commit" ] \
+                # The clone lives outside `$tmp`, so it never shows up in the comparison.
+                repo=$(mktemp -d)
+                git init -q "$repo"
+                git -C "$repo" fetch -q --depth 1 "$repository" "$commit"
+                [ "$(git -C "$repo" rev-parse FETCH_HEAD)" = "$commit" ] \
                   || { echo "::error::$repository: fetched a commit other than $commit"; exit 1; }
-                git -C "$tmp/repo" archive FETCH_HEAD "$directory" | tar -x -C "$tmp"
+                # `git archive` honours the pinned repository's `export-ignore` and
+                # `export-subst` attributes; a pinned directory that uses them would need
+                # another extraction.
+                git -C "$repo" archive FETCH_HEAD "$directory" | tar -x -C "$tmp"
                 source="$tmp/$directory"
                 ;;
               *) echo "::error::unknown pin kind $kind"; exit 1 ;;
@@ -72,12 +79,11 @@ jobs:
               || { echo "::error::$folder differs from its pinned source"; exit 1; }
             echo "$folder: matches its pinned source"
           done <<< "$PINS"
-          # Every folder in `rust/` is pinned.
-          for folder in rust/*/; do
-            folder=${folder%/}
-            printf '%s\n' "${pinned[@]}" | grep -qx "$folder" \
-              || { echo "::error::$folder has no pin"; exit 1; }
-          done
+          # Every entry in `rust/`, hidden or not, is a pinned folder.
+          while read -r entry; do
+            printf '%s\n' "${pinned[@]}" | grep -qxF "$entry" \
+              || { echo "::error::$entry has no pin"; exit 1; }
+          done < <(find rust -mindepth 1 -maxdepth 1)
       - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           auto-config: "false"
