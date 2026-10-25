@@ -162,9 +162,10 @@ theorem Node.new?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S : List 
   refine ⟨⟨out, [i]⟩, ?_, rfl, ?_⟩
   · have hsl : slice? T (i % p.m * q) (i % p.m * q + q) = some bytes := by
       rw [slice?_eq T _ _ (by omega) (by omega), Nat.add_sub_cancel_left]
-    simp only [Node.new?, Params.indicesPerHashOutput_eq h, h.1, ← hT, hq, hiq,
-      show 8 * q / 8 = q by omega, hsl, Params.collisionBitLength_eq h, hout, Option.pure_def,
-      Option.bind_eq_bind, Option.bind_some]
+    have hm0 : p.m ≠ 0 := by omega
+    simp only [Node.new?, Params.indicesPerHashOutput_eq h, hm0, ne_eq, not_false_eq_true,
+      guard_true, h.1, ← hT, hq, hiq, show 8 * q / 8 = q by omega, hsl,
+      Params.collisionBitLength_eq h, hout, Option.pure_def, Option.bind_eq_bind, Option.bind_some]
   · have hE := expandedN_of_expand bytes hbb _ _ out hlen hall
     -- Those bytes are §5.4.1.11's `X_{i+1}`.
     rwa [hbytes, hT, hTeq, ← List.map_drop, ← List.map_take, bytesOf, List.map_map,

@@ -121,11 +121,12 @@ theorem NodeRel.width_le (h : NodeRel p S r a la) (hr : r ≤ p.k) :
   · rw [hlen]; exact Nat.le_mul_of_pos_left _ (by omega)
   · rw [hl]; exact Nat.le_mul_of_pos_left _ (by omega)
 
-/-- **`validate_subtrees`** accepts sibling nodes exactly when their blocks are
-    `Mergeable`. -/
-theorem validateSubtrees?_iff (h : rp.Is p) (ha : NodeRel p S r a la)
+/-- **`validate_subtrees`** returns, without panicking, `Ok(())` for sibling nodes exactly when
+    their blocks are `Mergeable`. -/
+theorem validateSubtrees?_spec (h : rp.Is p) (ha : NodeRel p S r a la)
     (hb : NodeRel p S r b lb) (hr : r < p.k) :
-    validateSubtrees? rp a b = some () ↔ Mergeable Blake2b.hashFn p.toParams S r la lb := by
+    ∃ e, (validateSubtrees? rp a b).run = some e ∧
+      (e = .ok () ↔ Mergeable Blake2b.hashFn p.toParams S r la lb) := by
   have hc8 : 8 ≤ p.digitBits := p.digit_ge
   obtain ⟨hwa, hca, h1a⟩ := ha.width_le hr.le
   obtain ⟨hwb, hcb, h1b⟩ := hb.width_le hr.le
@@ -138,9 +139,12 @@ theorem validateSubtrees?_iff (h : rp.Is p) (ha : NodeRel p S r a la)
     simp [Node.indicesBefore?, ha.head, hb.head]
   have hdis : distinctIndices a b = true ↔ ¬ ∃ i ∈ la, i ∈ lb := by
     rw [distinctIndices_iff, ha.1, hb.1]
-  simp only [validateSubtrees?, Params.collisionByteLength_eq h, hord, Option.pure_def,
-    Option.bind_eq_bind, Option.bind_some, Mergeable, ← hcol, ← hdis]
-  cases hasCollision a b ((p.digitBits + 7) / 8) <;> cases distinctIndices a b <;> simp
+  generalize hd : decide (lb.headD 0 < la.headD 0) = d at hord
+  simp only [validateSubtrees?, Params.collisionByteLength_eq h, hord, Mergeable, ← hcol,
+    ← hdis]
+  cases hc : hasCollision a b ((p.digitBits + 7) / 8) <;>
+    cases hdi : distinctIndices a b <;> cases d <;> refine ⟨_, rfl, ?_⟩ <;>
+    simp_all [decide_eq_false_iff_not]
 
 /-- **`from_children`** merges `Mergeable` sibling nodes into the node over both blocks. -/
 theorem fromChildren?_spec (ha : NodeRel p S r a la) (hb : NodeRel p S r b lb)

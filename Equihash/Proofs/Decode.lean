@@ -23,15 +23,16 @@ def readPass (_ : Unit) (s : Cursor × List ℕ) : Option (ForInStep (Cursor × 
 
 /-- `indices_from_minimal`, as its loop body. -/
 theorem indicesFromMinimal?_eq (p : Params) (minimal : List ℕ) :
-    indicesFromMinimal? p minimal = (do
-      let sb ← p.solutionBytes?
-      if minimal.length ≠ sb then none else do
+    indicesFromMinimal? p minimal = (match p.solutionBytes? with
+      | none => some none
+      | some sb => if minimal.length ≠ sb then some none else do
         guard (divCeil (p.collisionBitLength + 1) 8 ≤ 4)
         let out ← expandArray? minimal (p.collisionBitLength + 1)
           (4 - divCeil (p.collisionBitLength + 1) 8)
         let s ← forIn Lean.Loop.mk (({ inner := out, pos := 0 } : Cursor), ([] : List ℕ)) readPass
-        pure s.2) := by
-  rfl
+        pure (some s.2)) := by
+  unfold indicesFromMinimal?
+  cases p.solutionBytes? <;> rfl
 
 /-- **The read loop.** From position `4j` of `4n` bytes, the loop reads the remaining
     `n - j` big-endian words, then stops at the end. -/
@@ -65,15 +66,16 @@ theorem forIn_readPass (out : List ℕ) (n : ℕ) (hlen : out.length = 4 * n) :
       List.range'_succ]
     simp
 
-/-- **`indices_from_minimal`**: a solution of the right length decodes to its `2^k` digits of
-    `n/(k+1) + 1` bits each, read most significant bit first; any other length is rejected. -/
+/-- **`indices_from_minimal`** never panics: a solution of the right length decodes to its
+    `2^k` digits of `n/(k+1) + 1` bits each, read most significant bit first; any other length
+    is `None`. -/
 theorem indicesFromMinimal?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p)
     (minimal : List ℕ) (hb : Bytes minimal) :
-    indicesFromMinimal? rp minimal = rp.solutionBytes?.bind fun sb =>
+    indicesFromMinimal? rp minimal = some (rp.solutionBytes?.bind fun sb =>
       if minimal.length = sb then
         some ((List.range (2 ^ p.k)).map
           (digitVal (p.digitBits + 1) (bitsOfBytes (bytesOf minimal))))
-      else none := by
+      else none) := by
   have hc8 : 8 ≤ p.digitBits := p.digit_ge
   have hc24 : p.digitBits ≤ 24 := p.digit_le
   rw [indicesFromMinimal?_eq, Params.collisionBitLength_eq h]

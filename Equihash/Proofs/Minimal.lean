@@ -44,18 +44,131 @@ def outerStep (c pad : ℕ) (s : List ℕ × ℕ × ℕ × ℕ) (b : ℕ) : List
       s.2.1 + 8 - c, acc, s.2.2.2 + w)
   else (s.1, s.2.1 + 8, acc, s.2.2.2)
 
-/-- Past its checks, and unless expansion is a copy, `expand_array_into` folds `outerStep` over the
-    input, from an all-zero output. -/
+/-- A loop whose every pass either continues or fails is a monadic fold. -/
+theorem forIn_option_eq_foldlM {α β : Type} (l : List α) (init : β)
+    (f : α → β → Option (ForInStep β)) (g : α → β → Option β)
+    (h : ∀ a b, f a b = (g a b).map .yield) :
+    forIn l init f = l.foldlM (fun b a => g a b) init := by
+  induction l generalizing init with
+  | nil => rfl
+  | cons a l ih =>
+    simp only [List.forIn_cons, h, List.foldlM_cons]
+    cases g a init <;> simp [ih]
+
+/-- `writeByte`, panicking (`none`) out of bounds as `vout[j + x] = …` does. -/
+def writeByte? (c w j acc ab : ℕ) (vout : List ℕ) (x : ℕ) : Option (List ℕ) :=
+  set? vout (j + x)
+    ((acc >>> (ab + 8 * (w - x - 1)) &&& ((2 ^ c - 1) >>> (8 * (w - x - 1)) &&& 255)) % 256)
+
+/-- `outerStep`, with each write panicking out of bounds. -/
+def outerStep? (c pad : ℕ) (s : List ℕ × ℕ × ℕ × ℕ) (b : ℕ) : Option (List ℕ × ℕ × ℕ × ℕ) :=
+  let w := divCeil c 8 + pad
+  let acc := s.2.2.1 <<< 8 % 2 ^ 32 ||| b
+  if s.2.1 + 8 ≥ c then do
+    let v ← (List.range' pad (w - pad)).foldlM (writeByte? c w s.2.2.2 acc (s.2.1 + 8 - c)) s.1
+    pure (v, s.2.1 + 8 - c, acc, s.2.2.2 + w)
+  else pure (s.1, s.2.1 + 8, acc, s.2.2.2)
+
+/-- Writing an element's bytes keeps the output's length. -/
+theorem length_foldl_writeByte (c w j acc ab : ℕ) (xs vout : List ℕ) :
+    (xs.foldl (writeByte c w j acc ab) vout).length = vout.length := by
+  induction xs generalizing vout with
+  | nil => rfl
+  | cons x xs ih => rw [List.foldl_cons, ih]; simp [writeByte]
+
+/-- Writes in bounds do not panic. -/
+theorem foldlM_writeByte? (c w j acc ab : ℕ) (xs vout : List ℕ)
+    (hb : ∀ x ∈ xs, j + x < vout.length) :
+    xs.foldlM (writeByte? c w j acc ab) vout = some (xs.foldl (writeByte c w j acc ab) vout) := by
+  induction xs generalizing vout with
+  | nil => rfl
+  | cons x xs ih =>
+    have hx := hb x List.mem_cons_self
+    simp only [List.foldlM_cons, List.foldl_cons, writeByte?, set?, hx, ↓reduceIte,
+      Option.bind_eq_bind, Option.bind_some]
+    exact ih _ fun y hy => by
+      rw [List.length_set]; exact hb y (List.mem_cons_of_mem _ hy)
+
+/-- The outer loop after `t` input bytes, as far as its writes' bounds go: the output keeps its
+    length, and the next digit starts at `⌊8t/c⌋·w`. -/
+def BoundInv (c w len t : ℕ) (s : List ℕ × ℕ × ℕ × ℕ) : Prop :=
+  s.1.length = len ∧ s.2.1 = 8 * t % c ∧ s.2.2.2 = 8 * t / c * w
+
+/-- The outer loop writes nothing out of bounds, into an output of at least `⌊8L/c⌋·w` bytes. -/
+theorem foldlM_outerStep? (vin : List ℕ) (c pad len : ℕ) (hc8 : 8 ≤ c)
+    (hlen : 8 * vin.length / c * (divCeil c 8 + pad) ≤ len) (init : List ℕ × ℕ × ℕ × ℕ)
+    (hinit : BoundInv c (divCeil c 8 + pad) len 0 init) :
+    vin.foldlM (outerStep? c pad) init = some (vin.foldl (outerStep c pad) init) := by
+  set w := divCeil c 8 + pad with hw
+  suffices ∀ t ≤ vin.length,
+      (vin.take t).foldlM (outerStep? c pad) init =
+        some ((vin.take t).foldl (outerStep c pad) init) ∧
+      BoundInv c w len t ((vin.take t).foldl (outerStep c pad) init) by
+    have := (this vin.length le_rfl).1
+    rwa [List.take_of_length_le le_rfl] at this
+  intro t ht
+  induction t with
+  | zero => exact ⟨rfl, by simpa using hinit⟩
+  | succ t ih =>
+    obtain ⟨hM, hl, hab, hj⟩ := ih (by omega)
+    rw [List.take_add_one, List.getElem?_eq_getElem (by omega), Option.toList_some,
+      List.foldlM_append, hM, List.foldl_append]
+    simp only [Option.bind_eq_bind, Option.bind_some, List.foldlM_cons, List.foldlM_nil,
+      List.foldl_cons, List.foldl_nil]
+    set s := (vin.take t).foldl (outerStep c pad) init
+    have hdm := div_mod_add_eight (8 * t) c hc8
+    have h8 : 8 * (t + 1) = 8 * t + 8 := by ring
+    unfold outerStep? outerStep
+    dsimp only
+    rw [← hw]
+    split_ifs with hemit
+    · -- A digit completes: its `w` bytes fit below `⌊8L/c⌋·w`.
+      obtain ⟨hq, hr⟩ := hdm.1 (by omega)
+      have hjw : s.2.2.2 + w ≤ len := by
+        have hq' : 8 * t / c + 1 ≤ 8 * vin.length / c := by
+          rw [← hq]; exact Nat.div_le_div_right (by omega)
+        have := Nat.mul_le_mul_right w hq'
+        rw [Nat.succ_mul] at this; omega
+      rw [foldlM_writeByte? _ _ _ _ _ _ _ fun x hx => by
+        rw [List.mem_range'_1] at hx; omega]
+      refine ⟨rfl, by rw [length_foldl_writeByte, hl], by rw [h8, hr, hab], ?_⟩
+      show s.2.2.2 + w = 8 * (t + 1) / c * w
+      rw [h8, hq, Nat.succ_mul, hj]
+    · obtain ⟨hq, hr⟩ := hdm.2 (by omega)
+      exact ⟨rfl, hl, by rw [h8, hr, hab], by rw [h8, hq, hj]⟩
+
+/-- Past its checks, and unless expansion is a copy, `expand_array_into` writes nothing out of
+    bounds, and folds `outerStep` over the input, from an all-zero output. -/
 theorem expandArrayInto?_eq_fold (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥ 8)
     (h32 : 32 ≥ 7 + c) (hl : vout.length = expandedLen vin.length c pad)
     (hne : ¬ expandedLen vin.length c pad = vin.length) :
     expandArrayInto? vin c pad vout =
       some (vin.foldl (outerStep c pad) (vout.map fun _ => 0, 0, 0, 0)).1 := by
+  have hlen : 8 * vin.length / c * (divCeil c 8 + pad) ≤ (vout.map fun _ => 0).length := by
+    rw [List.length_map, hl, expandedLen, Nat.le_div_iff_mul_le (by omega)]
+    calc 8 * vin.length / c * (divCeil c 8 + pad) * c
+        = 8 * vin.length / c * c * (divCeil c 8 + pad) := by ring
+      _ ≤ 8 * vin.length * (divCeil c 8 + pad) :=
+        Nat.mul_le_mul_right _ (Nat.div_mul_le_self _ _)
+      _ = 8 * (divCeil c 8 + pad) * vin.length := by ring
   simp only [expandArrayInto?, h8, h32, hl, hne, guard_true, ↓reduceIte, Option.pure_def,
     Option.bind_eq_bind, Option.bind_some, Std.Legacy.Range.forIn_eq_forIn_range']
-  simp only [Std.Legacy.Range.size, forIn_some_yield, Option.bind_some]
-  rw [forIn_option_eq vin _ _ (fun b s => outerStep c pad s b) (fun b s => by
-    simp only [outerStep]; split_ifs <;> simp; rfl)]
+  simp only [Std.Legacy.Range.size]
+  rw [forIn_option_eq_foldlM vin _ _ (fun b s => outerStep? c pad s b) (fun b s => by
+    simp only [outerStep?]
+    split_ifs
+    · rw [forIn_option_eq_foldlM _ _ _ (fun x v => writeByte? c (divCeil c 8 + pad) s.2.2.2
+        (s.2.2.1 <<< 8 % 2 ^ 32 ||| b) (s.2.1 + 8 - c) v x) (fun x v => by
+          simp only [writeByte?]
+          cases set? v _ _ <;> rfl)]
+      have key : ∀ {α γ : Type} (x : Option α) (g : α → γ),
+          (x.bind fun a => some (ForInStep.yield (g a))) =
+            Option.map ForInStep.yield (x >>= fun v => pure (g v)) := by
+        intro α γ x g; cases x <;> rfl
+      simp only [Nat.add_sub_cancel, Nat.div_one]
+      exact key _ _
+    · rfl)]
+  rw [foldlM_outerStep? vin c pad _ h8 hlen _ ⟨rfl, by simp, by simp⟩]
   rfl
 
 /-! ## The inner loop -/

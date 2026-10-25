@@ -1,10 +1,12 @@
 /-
 `src/verify.rs`: the single-pass Equihash verifier.
 
-A Rust panic, and a Rust `Err`, are both `none`: the verifier did not accept.
+A Rust panic is `none`; a function returning a Rust `Result` is into `ExceptT Kind Option`
+(`Verifier/Error.lean`).
 -/
 module
 
+public import Equihash.Verifier.Error
 public import Equihash.Verifier.Minimal
 public import Equihash.Verifier.Params
 
@@ -16,22 +18,22 @@ namespace Equihash.Verifier
 def HASH_BATCH : ℕ := 64
 
 /-- `validate_tree` (lines 294–380): checks the solution tree for `indices` in one pass over
-    its leaves, keeping the unmerged left subtree of each height; `some ()` exactly when the
-    Rust returns `Ok(())`.
+    its leaves, keeping the unmerged left subtree of each height.
 
 `hash blocks digests` is the closure call `hash(blocks, digests)`, returning `digests` as the
 closure leaves them, or `none` where it panics. `sort_unstable` is `List.mergeSort`: both
 sort, and a list of numbers has one sorted order, so which algorithm sorts does not matter.
 Rust's subtractions `leaf + 1 - (1 << height)` and `right_start - (1 << height)` cannot
 underflow, since bits `0 .. height` of `leaf` are set; `leaf >> height` and `1 << height` cannot
-overflow, since `leaf < 2^k` keeps `height ≤ k`, and `Params::new` keeps `k ≤ 63`; `row.set`
-never writes past `row`, whose length is `row_len`. -/
+overflow, since `leaf < 2^k` keeps `height ≤ k`, and `Params::new` keeps `k ≤ 63`.
+`row[i] = …` panics out of bounds, as `set?` does. `*block = …` writes through `iter_mut`, which
+indexes nothing, so it is `bs.set j` with `j` below `bs.len()`. -/
 def validateTree? (p : Params) (indices : List ℕ)
-    (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) : Option Unit := do
+    (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) : ExceptT Kind Option Unit := do
   -- Anything else would leave the tree, or its root, partly unvisited.
   let leaves := indices.length
   if p.solutionIndices? ≠ some leaves then
-    none
+    throw .InvalidParams
   let perHash := p.indicesPerHashOutput
   let leafBytes := p.n / 8
   let collisionBytes := p.collisionByteLength
@@ -68,15 +70,15 @@ def validateTree? (p : Params) (indices : List ℕ)
         let leftIndices ← slice? indices leftStart rightStart
         let rightIndices ← slice? indices rightStart (leaf + 1)
         if (← slice? left 0 collisionBytes) ≠ (← slice? row 0 collisionBytes) then
-          none
-        if (← rightIndices[0]?) < (← leftIndices[0]?) then
-          none
+          throw .Collision
+        if (← (rightIndices[0]? : Option ℕ)) < (← (leftIndices[0]? : Option ℕ)) then
+          throw .OutOfOrder
         if !allDistinct && leftIndices.any (fun i => rightIndices.contains i) then
-          none
+          throw .DuplicateIdxs
         -- On success the merged subtree's indices are `left || right`,
         -- which is their order in `indices`.
         for (l, i) in (← slice? left collisionBytes left.length).zipIdx do
-          row := row.set i (l ^^^ (← row[collisionBytes + i]?))
+          row ← set? row i (l ^^^ (← (row[collisionBytes + i]? : Option ℕ)))
         height := height + 1
       let len := rowLen - height * collisionBytes
       pending ← copyFromSlice? pending (height * rowLen) (← slice? row 0 len)
@@ -85,6 +87,6 @@ def validateTree? (p : Params) (indices : List ℕ)
   if root.all (· == 0) then
     return ()
   else
-    none
+    throw .NonZeroRootHash
 
 end Equihash.Verifier

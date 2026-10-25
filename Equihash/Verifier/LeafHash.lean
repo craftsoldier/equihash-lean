@@ -4,6 +4,9 @@
 
 The crate also has AVX2 and NEON kernels, which `Kernel::detect` picks on CPUs that support
 them. They are not transcribed here: the verifier below runs the portable kernel.
+
+The state arrays are Rust's `[u64; 8]` and `[u64; 16]`, indexed only by constants and loop
+counters below those lengths, so their indexing cannot panic; `a[i]!` and `a.set! i` stand for it.
 -/
 module
 
@@ -98,14 +101,15 @@ structure Midstate where
   count : UInt64
 
 /-- `Midstate::new` (lines 189–226): the state after the prefix's first block, and the 12
-    prefix bytes left for the final block; `none` unless `input ‖ nonce` is 140 bytes.
+    prefix bytes left for the final block; `some none` (`None`) unless `input ‖ nonce` is
+    140 bytes.
 
 `checked_add` of two slice lengths cannot overflow, so it is a plain `+` here. The closing
-`debug_assert_eq!(filled, TAIL_BYTES)` holds for every 140-byte prefix
-(`Midstate.new?_spec`), so it is left out. -/
-def Midstate.new? (p : Params) (input nonce : List ℕ) : Option Midstate := do
+`debug_assert_eq!(filled, TAIL_BYTES)` is not evaluated in a release build; it holds for every
+140-byte prefix anyway (`Midstate.new?_spec`). -/
+def Midstate.new? (p : Params) (input nonce : List ℕ) : Option (Option Midstate) := do
   if input.length + nonce.length ≠ HEADER_BYTES + NONCE_BYTES then
-    none
+    return none
   let count : UInt64 := UInt64.ofNat (HEADER_BYTES + NONCE_BYTES + 4)
   let mut h := IV
   h := h.set! 0 (h[0]! ^^^ (0x01010000 ||| UInt64.ofNat p.hashOutput))
@@ -127,7 +131,7 @@ def Midstate.new? (p : Params) (input nonce : List ℕ) : Option Midstate := do
       block ← copyFromSlice? block filled (part.take take)
       filled := filled + take
       part := part.drop take
-  return {
+  return some {
     h := h
     m0 := u64FromLeBytes (block.take 8)
     m1Low := UInt64.ofNat (u32FromLeBytes ((block.drop 8).take 4))
@@ -173,10 +177,11 @@ structure LeafHasher where
   hashLen : ℕ
 
 /-- `LeafHasher::new` (lines 344–346) and `with_kernel` (lines 351–365), with the portable
-    kernel, which every CPU supports; `none` unless `input ‖ nonce` is 140 bytes. -/
-def LeafHasher.new? (p : Params) (input nonce : List ℕ) : Option LeafHasher := do
-  let midstate ← Midstate.new? p input nonce
-  return { midstate, hashLen := p.hashOutput }
+    kernel, which every CPU supports; `some none` (`None`) unless `input ‖ nonce` is 140
+    bytes. -/
+def LeafHasher.new? (p : Params) (input nonce : List ℕ) : Option (Option LeafHasher) := do
+  let some midstate ← Midstate.new? p input nonce | return none
+  return some { midstate, hashLen := p.hashOutput }
 
 /-- `LeafHasher::hash` (lines 369–396) with the portable kernel, of one lane: the digest of
     each block index, its bytes past the digest length zero; `none` where the Rust panics.

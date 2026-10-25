@@ -10,7 +10,11 @@ public import Equihash.Verifier.Std
 namespace Equihash.Verifier
 
 /-- `Params` (`src/params.rs`, lines 2–5). `Params::new` builds it only for parameters it
-    accepts, so `n` is never zero below. -/
+    accepts, so `n` is never zero below.
+
+`n` and `k` are `u32`s in Rust and naturals here, which agree below `2^32`, the only values
+Rust can pass: no `u32` arithmetic on them overflows there, since `k + 1 ≤ n` (`k < n` is
+checked first) and `indices_per_hash_output() * n` is at most 512. -/
 structure Params where
   n : ℕ
   k : ℕ
@@ -21,6 +25,13 @@ namespace Params
 def new? (n k : ℕ) : Option Params :=
   if n % 8 = 0 ∧ k ≥ 3 ∧ k < n ∧ n % (k + 1) = 0 ∧ n ≤ 512 ∧
       8 ≤ n / (k + 1) ∧ n / (k + 1) ≤ 24 then
+    some { n, k }
+  else none
+
+/-- `equihash 0.3.0`'s `Params::new` (`src/params.rs`, lines 9–20): the first four of the
+    checks `new?` makes, without `n ≤ 512` and the bounds on `n / (k + 1)`. -/
+def newUnbounded? (n k : ℕ) : Option Params :=
+  if n % 8 = 0 ∧ k ≥ 3 ∧ k < n ∧ n % (k + 1) = 0 then
     some { n, k }
   else none
 

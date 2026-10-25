@@ -5,6 +5,12 @@ Rust's fixed-width integers are natural numbers here. Where Rust discards bits o
 (`<<` on a `u32`, `as u8`), the code says so with an explicit `%`; where it checks for overflow
 (`checked_shl`, `checked_mul`), so does the Lean, for a 64-bit `usize`. Elsewhere no addition or
 multiplication overflows for any input shorter than `2^32` bytes.
+
+The model is a release build, as Zcash nodes run: arithmetic that overflows wraps rather than
+panicking, and `debug_assert!` is not evaluated. A function that can panic returns `none` for the
+panic; one that can also return a Rust `None` returns `Option (Option α)`, `some none` for that
+`None`. A function that cannot panic returns Rust's own `Option` (`checkedMul?`,
+`Params.solutionBytes?`), or `none` for an `Err` its doc names (`Cursor.readExact?`).
 -/
 module
 
@@ -33,6 +39,10 @@ def u32ToLeBytes (x : ℕ) : List ℕ := [x % 256, x / 256 % 256, x / 256 ^ 2 % 
     `start ≤ end ≤ s.len()`. -/
 def slice? {α : Type} (s : List α) (start «end» : ℕ) : Option (List α) :=
   if start ≤ «end» ∧ «end» ≤ s.length then some ((s.drop start).take («end» - start)) else none
+
+/-- `s[i] = v`: `s` with position `i` set to `v`, panicking (`none`) unless `i < s.len()`. -/
+def set? {α : Type} (s : List α) (i : ℕ) (v : α) : Option (List α) :=
+  if i < s.length then some (s.set i v) else none
 
 /-- `usize::BITS` on the 64-bit targets Zcash nodes run on. -/
 def USIZE_BITS : ℕ := 64

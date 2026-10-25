@@ -16,17 +16,6 @@ open Equihash Equihash.Spec
 
 /-! ## Loops -/
 
-/-- A loop whose every pass either continues or fails is a monadic fold. -/
-theorem forIn_option_eq_foldlM {α β : Type} (l : List α) (init : β)
-    (f : α → β → Option (ForInStep β)) (g : α → β → Option β)
-    (h : ∀ a b, f a b = (g a b).map .yield) :
-    forIn l init f = l.foldlM (fun b a => g a b) init := by
-  induction l generalizing init with
-  | nil => rfl
-  | cons a l ih =>
-    simp only [List.forIn_cons, h, List.foldlM_cons]
-    cases g a init <;> simp [ih]
-
 /-- The `while` loop's unfolding: one pass, then the rest. -/
 theorem loop_unfold {β : Type} {b : β} {f : Unit → β → Option (ForInStep β)} :
     forIn Lean.Loop.mk b f = (do
@@ -59,20 +48,22 @@ theorem foldlM_xor (cb : ℕ) (hcb : 1 ≤ cb) (seg : List ℕ) (k : ℕ) (row :
     (hlen : k + seg.length + cb ≤ row.length) :
     (seg.zipIdx k).foldlM (fun row x => do
         let v ← row[cb + x.2]?
-        pure (row.set x.2 (x.1 ^^^ v))) row =
+        set? row x.2 (x.1 ^^^ v)) row =
       some (row.take k ++ List.zipWith (· ^^^ ·) seg (row.drop (k + cb)) ++
         row.drop (k + seg.length)) := by
-  simp only [Option.pure_def, Option.bind_eq_bind]
+  simp only [Option.bind_eq_bind]
   induction seg generalizing k row with
   | nil => simp
   | cons a seg ih =>
     simp only [List.length_cons] at hlen
     simp only [List.zipIdx_cons, List.foldlM_cons]
     have hk : cb + k < row.length := by omega
+    have hk' : k < row.length := by omega
     rw [List.getElem?_eq_getElem hk]
     simp only [Option.bind_eq_bind, Option.bind_some]
+    rw [show set? row k (a ^^^ row[cb + k]) = some (row.set k (a ^^^ row[cb + k])) by
+      simp [set?, hk'], Option.bind_some]
     rw [ih (k + 1) _ (by simp only [List.length_set]; omega)]
-    have hk' : k < row.length := by omega
     have hd : row.drop (k + cb) = row[cb + k] :: row.drop (k + 1 + cb) := by
       rw [List.drop_eq_getElem_cons (by omega)]; simp [Nat.add_comm k cb, Nat.add_right_comm]
     congr 1
@@ -312,7 +303,7 @@ def whilePass (indices pending : List ℕ) (allDistinct : Bool) (rowLen collisio
     if !allDistinct && leftIndices.any (fun i => rightIndices.contains i) then
       none
     for (l, i) in (← slice? left collisionBytes left.length).zipIdx do
-      row := row.set i (l ^^^ (← row[collisionBytes + i]?))
+      row ← set? row i (l ^^^ (← row[collisionBytes + i]?))
     height := height + 1
     return .yield (row, height)
   else
@@ -358,10 +349,175 @@ def batchPass (p : Params) (indices : List ℕ) (allDistinct : Bool)
     let s ← forIn (chunk.zip ds).zipIdx (pending, row) (leafPass p indices allDistinct batch)
     return .yield (s.1, s.2, blocks, digests)
 
-/-- `validate_tree`, as its loop bodies. -/
-theorem validateTree?_eq (p : Params) (indices : List ℕ)
+/-! ## The same loop bodies, with errors -/
+
+/-- `whilePass`, returning each `Err`. -/
+def whilePassE (indices pending : List ℕ) (allDistinct : Bool) (rowLen collisionBytes leaf : ℕ)
+    (_ : Unit) (s : List ℕ × ℕ) : ExceptT Kind Option (ForInStep (List ℕ × ℕ)) := do
+  let mut row := s.1
+  let mut height := s.2
+  if (leaf >>> height) &&& 1 = 1 then
+    let len := rowLen - height * collisionBytes
+    let left ← slice? pending (height * rowLen) (height * rowLen + len)
+    let rightStart := leaf + 1 - (1 <<< height)
+    let leftStart := rightStart - (1 <<< height)
+    let leftIndices ← slice? indices leftStart rightStart
+    let rightIndices ← slice? indices rightStart (leaf + 1)
+    if (← slice? left 0 collisionBytes) ≠ (← slice? row 0 collisionBytes) then
+      throw .Collision
+    if (← (rightIndices[0]? : Option ℕ)) < (← (leftIndices[0]? : Option ℕ)) then
+      throw .OutOfOrder
+    if !allDistinct && leftIndices.any (fun i => rightIndices.contains i) then
+      throw .DuplicateIdxs
+    for (l, i) in (← slice? left collisionBytes left.length).zipIdx do
+      row ← set? row i (l ^^^ (← (row[collisionBytes + i]? : Option ℕ)))
+    height := height + 1
+    return .yield (row, height)
+  else
+    return .done (row, height)
+
+/-- `leafPass`, returning each `Err`. -/
+def leafPassE (p : Params) (indices : List ℕ) (allDistinct : Bool) (batch : ℕ)
+    (x : (ℕ × List ℕ) × ℕ) (s : List ℕ × List ℕ) :
+    ExceptT Kind Option (ForInStep (List ℕ × List ℕ)) :=
+  have pending := s.1
+  have row := s.2
+  match x with
+  | ((index, digest), offset) => do
+    let leaf := batch * HASH_BATCH + offset
+    let start := index % p.indicesPerHashOutput * (p.n / 8)
+    let row ← expandArrayInto? (← slice? digest start (start + p.n / 8)) p.collisionBitLength 0
+      row
+    let s ← forIn Lean.Loop.mk (row, 0)
+      (whilePassE indices pending allDistinct p.hashLength p.collisionByteLength leaf)
+    let row := s.1
+    let height := s.2
+    let len := p.hashLength - height * p.collisionByteLength
+    let pending ← copyFromSlice? pending (height * p.hashLength) (← slice? row 0 len)
+    return .yield (pending, row)
+
+/-- `batchPass`, returning each `Err`. -/
+def batchPassE (p : Params) (indices : List ℕ) (allDistinct : Bool)
+    (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) (x : List ℕ × ℕ)
+    (s : List ℕ × List ℕ × List ℕ × List (List ℕ)) :
+    ExceptT Kind Option (ForInStep (List ℕ × List ℕ × List ℕ × List (List ℕ))) :=
+  have pending := s.1
+  have row := s.2.1
+  have blocks := s.2.2.1
+  have digests := s.2.2.2
+  match x with
+  | (chunk, batch) => do
+    let bs ← forIn chunk.zipIdx (blocks.take chunk.length) fun x bs =>
+      match x with
+      | (index, j) => pure (.yield (bs.set j (index / p.indicesPerHashOutput)))
+    let blocks := bs ++ blocks.drop chunk.length
+    let ds ← hash bs (digests.take chunk.length)
+    let digests := ds ++ digests.drop chunk.length
+    let s ← forIn (chunk.zip ds).zipIdx (pending, row) (leafPassE p indices allDistinct batch)
+    return .yield (s.1, s.2, blocks, digests)
+
+/-- `validate_tree`, as its loop bodies with errors. -/
+theorem validateTree?_eqE (p : Params) (indices : List ℕ)
     (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) :
     validateTree? p indices hash =
+      (if p.solutionIndices? ≠ some indices.length then throw .InvalidParams else do
+        let sorted := indices.mergeSort
+        let allDistinct := (sorted.zip sorted.tail).all fun (a, b) => a != b
+        let s ← forIn (← chunks? indices HASH_BATCH).zipIdx
+          (List.replicate ((p.k + 1) * p.hashLength) 0, List.replicate p.hashLength 0,
+            List.replicate HASH_BATCH 0, List.replicate HASH_BATCH (List.replicate 64 0))
+          (batchPassE p indices allDistinct hash)
+        let root ← slice? s.1 (p.k * p.hashLength) (p.k * p.hashLength + p.collisionByteLength)
+        if root.all (· == 0) then pure () else throw .NonZeroRootHash) := by
+  rfl
+
+/-- A pass of the `while` loop with errors erases to the pass proof B reasons about. -/
+theorem erase_whilePassE (indices pending : List ℕ) (allDistinct : Bool)
+    (rowLen collisionBytes leaf : ℕ) (u : Unit) (s : List ℕ × ℕ) :
+    erase (whilePassE indices pending allDistinct rowLen collisionBytes leaf u s) =
+      whilePass indices pending allDistinct rowLen collisionBytes leaf u s := by
+  unfold whilePassE whilePass
+  dsimp only
+  split
+  · simp only [erase_bind, erase_lift, erase_ite, erase_throw, erase_pure, erase_forIn_list]
+    rfl
+  · rfl
+
+/-- A pass of the `while` loop continues only from a set bit of `leaf`, one height up. -/
+theorem whilePass_yield {indices pending : List ℕ} {allDistinct : Bool}
+    {rowLen collisionBytes leaf : ℕ} {s s' : List ℕ × ℕ}
+    (h : whilePass indices pending allDistinct rowLen collisionBytes leaf () s =
+      some (.yield s')) :
+    leaf >>> s'.2 < leaf >>> s.2 := by
+  have peel : ∀ {α γ : Type} {x : Option α} {f : α → Option γ} {c : γ},
+      x >>= f = some c → ∃ a, f a = some c := by
+    intro α γ x f c h
+    cases x with
+    | none => cases h
+    | some a => exact ⟨a, h⟩
+  unfold whilePass at h
+  dsimp only at h
+  split at h
+  · rename_i hbit
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    split at h
+    · cases h
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    split at h
+    · cases h
+    split at h
+    · cases h
+    obtain ⟨_, h⟩ := peel h
+    obtain ⟨_, h⟩ := peel h
+    cases h
+    have hpos : 0 < leaf >>> s.2 := by
+      rcases Nat.eq_zero_or_pos (leaf >>> s.2) with h0 | h0
+      · rw [h0] at hbit; simp at hbit
+      · exact h0
+    rw [Nat.shiftRight_succ]
+    omega
+  · exact absurd h (by simp)
+
+/-- A leaf's pass with errors erases to the pass proof B reasons about, its `while` loop
+    included. -/
+theorem erase_leafPassE (p : Params) (indices : List ℕ) (allDistinct : Bool) (batch : ℕ)
+    (x : (ℕ × List ℕ) × ℕ) (s : List ℕ × List ℕ) :
+    erase (leafPassE p indices allDistinct batch x s) =
+      leafPass p indices allDistinct batch x s := by
+  obtain ⟨⟨index, digest⟩, offset⟩ := x
+  have hloop : ∀ b, erase (forIn Lean.Loop.mk b (whilePassE indices s.1 allDistinct p.hashLength
+        p.collisionByteLength (batch * HASH_BATCH + offset))) =
+      forIn Lean.Loop.mk b (whilePass indices s.1 allDistinct p.hashLength
+        p.collisionByteLength (batch * HASH_BATCH + offset)) := fun b => by
+    rw [erase_forIn_loop _ _ (fun s => (batch * HASH_BATCH + offset) >>> s.2)
+      (fun b b' hb => by rw [erase_whilePassE] at hb; exact whilePass_yield hb)]
+    simp only [erase_whilePassE]
+  unfold leafPassE leafPass
+  dsimp only
+  simp only [erase_bind, erase_lift, erase_pure, hloop]
+  rfl
+
+/-- A batch's pass with errors erases to the pass proof B reasons about, its leaves included. -/
+theorem erase_batchPassE (p : Params) (indices : List ℕ) (allDistinct : Bool)
+    (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) (x : List ℕ × ℕ)
+    (s : List ℕ × List ℕ × List ℕ × List (List ℕ)) :
+    erase (batchPassE p indices allDistinct hash x s) =
+      batchPass p indices allDistinct hash x s := by
+  obtain ⟨chunk, batch⟩ := x
+  unfold batchPassE batchPass
+  dsimp only
+  simp only [erase_bind, erase_lift, erase_pure, erase_forIn_list, erase_leafPassE]
+  rfl
+
+/-- `validate_tree`'s accepted results, as its loop bodies. -/
+theorem validateTree?_eq (p : Params) (indices : List ℕ)
+    (hash : List ℕ → List (List ℕ) → Option (List (List ℕ))) :
+    erase (validateTree? p indices hash) =
       (if p.solutionIndices? ≠ some indices.length then none else do
         let sorted := indices.mergeSort
         let allDistinct := (sorted.zip sorted.tail).all fun (a, b) => a != b
@@ -371,7 +527,12 @@ theorem validateTree?_eq (p : Params) (indices : List ℕ)
           (batchPass p indices allDistinct hash)
         let root ← slice? s.1 (p.k * p.hashLength) (p.k * p.hashLength + p.collisionByteLength)
         if root.all (· == 0) then pure () else none) := by
-  rfl
+  rw [validateTree?_eqE]
+  split
+  · rfl
+  · simp only [erase_bind, erase_lift, erase_pure, erase_throw, erase_ite, erase_forIn_list,
+      erase_batchPassE]
+    rfl
 
 /-! ## A pass of the `while` loop -/
 
@@ -383,12 +544,17 @@ theorem Params.hashLength_eq {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
 theorem forIn_xor (cb : ℕ) (hcb : 1 ≤ cb) (seg row : List ℕ)
     (hlen : seg.length + cb ≤ row.length) :
     forIn seg.zipIdx row (fun x (row : List ℕ) =>
-      row[cb + x.2]?.bind fun v => pure (ForInStep.yield (row.set x.2 (x.1 ^^^ v)))) =
+      row[cb + x.2]?.bind fun v =>
+        (set? row x.2 (x.1 ^^^ v)).bind fun r => pure (ForInStep.yield r)) =
       some (List.zipWith (· ^^^ ·) seg (row.drop cb) ++ row.drop seg.length) := by
   rw [forIn_option_eq_foldlM _ _ _ (fun x row => do
     let v ← row[cb + x.2]?
-    pure (row.set x.2 (x.1 ^^^ v))) (fun x row => by
-      rcases row[cb + x.2]? with _ | v <;> simp)]
+    set? row x.2 (x.1 ^^^ v)) (fun x row => by
+      rcases row[cb + x.2]? with _ | v
+      · rfl
+      · show ((set? row x.2 (x.1 ^^^ v)).bind fun r => pure (ForInStep.yield r)) =
+          Option.map ForInStep.yield (set? row x.2 (x.1 ^^^ v))
+        cases set? row x.2 (x.1 ^^^ v) <;> rfl)]
   rw [foldlM_xor cb hcb seg 0 row (by omega)]
   simp
 
@@ -679,7 +845,10 @@ theorem leafRow (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S 
   obtain ⟨q, hq⟩ := p.n_dvd_8
   have hn8 : rp.n / 8 = q := by rw [h.1, hq]; omega
   obtain ⟨node, hnode, -, hE⟩ := Node.new?_spec h hst L[c]
-  simp only [Node.new?, Option.bind_eq_bind, Option.pure_def] at hnode
+  have hm0 : rp.indicesPerHashOutput ≠ 0 := by
+    rw [Params.indicesPerHashOutput_eq h]; have := one_le_m p.toParams; omega
+  simp only [Node.new?, hm0, ne_eq, not_false_eq_true, guard_true, Option.bind_eq_bind,
+    Option.pure_def] at hnode
   have hstart : L[c] % rp.indicesPerHashOutput * rp.n / 8 =
       L[c] % rp.indicesPerHashOutput * (rp.n / 8) := by
     rw [h.1, hq, Nat.mul_div_assoc _ (by omega : 8 ∣ 8 * q)]
@@ -995,12 +1164,12 @@ theorem validateTree?_iff (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.t
     (hhash : ∀ bs ds, ds.length = bs.length → (∀ d ∈ ds, d.length = 64) →
       hash bs ds = some (bs.map D))
     (hL : L.length = 2 ^ p.k) :
-    validateTree? rp L hash = some () ↔
+    (validateTree? rp L hash).run = some (.ok ()) ↔
       Good Blake2b.hashFn p.toParams S p.k L ∧
         (rest p S p.k L).take p.digitBits = zeros p.digitBits := by
   have hc8 : 8 ≤ p.digitBits := p.digit_ge
   have hAD := @nodup_of_allDistinct L
-  rw [validateTree?_eq, Params.solutionIndices?_eq h, hL]
+  rw [← erase_eq_some, validateTree?_eq, Params.solutionIndices?_eq h, hL]
   simp only [ne_eq, not_true_eq_false, ↓reduceIte, Option.bind_eq_bind,
     show chunks? L HASH_BATCH = some (chunksSucc 63 L) from rfl, Option.bind_some,
     Params.hashLength_eq h, Params.collisionByteLength_eq h, h.2]
