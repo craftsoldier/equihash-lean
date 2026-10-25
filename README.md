@@ -1,9 +1,10 @@
 # Formalizing Equihash
 
-Zcash's proof of work is Equihash. This repository is a Lean 4 proof that the Equihash
-verifiers Zcash nodes use accept exactly the solutions the Zcash protocol specification
-(§7.7.1) calls valid. It is equally important to state clearly what is and is not
-formally verified.
+Zcash's proof of work is Equihash. This repository is a Lean 4 proof, release by release, that
+the Equihash verifiers Zcash software runs accept exactly the solutions the Zcash protocol
+specification (§7.7.1) calls valid, with distinct indices. Each theorem states its exact
+assumptions; for `zakura-equihash` 4.0.0 these are a 140-byte header and nonce, and that the
+AVX2/NEON kernels compute what the portable kernel does.
 
 | Crate             | Version | Status  |
 |-------------------|---------|---------|
@@ -34,6 +35,11 @@ at your option.
 
 The pinned crates in `rust/` keep their own licenses, and the protocol specification excerpts
 in `spec/` are under the MIT license in [`spec/COPYING.rst`](spec/COPYING.rst).
+
+The Lean in `Equihash/Verifier/` transcribes `zakura-equihash`, Copyright (c) The Zakura
+Contributors, originally Copyright (c) 2020-2022 The Zcash developers and 2017-2021 The
+Electric Coin Company, under MIT OR Apache-2.0; see
+[`rust/zakura-equihash-4.0.0/COPYRIGHT`](rust/zakura-equihash-4.0.0/COPYRIGHT).
 
 ### Contribution
 
