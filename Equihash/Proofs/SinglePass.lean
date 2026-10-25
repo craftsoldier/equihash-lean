@@ -4,7 +4,7 @@ exactly the `Good` trees whose root digit is zero.
 -/
 module
 
-public import Equihash.Proofs.Verify
+public import Equihash.Proofs.Recursive
 public import Init.Internal.Order.While
 
 @[expose] public section

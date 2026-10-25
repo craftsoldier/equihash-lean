@@ -14,6 +14,7 @@ package «equihash» where
 
 @[default_target] lean_lib «Equihash» {}
 
-/-- The specification, the verifier and BLAKE2b on real data. -/
+/-- The specification, the verifier, each release and BLAKE2b on real data. -/
 @[default_target] lean_lib «Tests» where
-  roots := #[`Equihash.Tests.Spec, `Equihash.Tests.Verifier, `Equihash.Tests.Blake2b]
+  roots := #[`Equihash.Tests.Spec, `Equihash.Tests.Verifier, `Equihash.Tests.Releases,
+    `Equihash.Tests.Blake2b]

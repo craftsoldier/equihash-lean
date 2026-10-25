@@ -8,6 +8,7 @@
 module
 
 public import Equihash.Spec
-public import Equihash.Verifier.Verify
-public import Equihash.Proofs.Verify
-public import Equihash.Proofs.Solution
+public import Equihash.Verifier.Recursive
+public import Equihash.Verifier.Releases
+public import Equihash.Proofs.Recursive
+public import Equihash.Proofs.Releases
