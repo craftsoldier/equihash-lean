@@ -28,8 +28,8 @@ def new? (n k : ℕ) : Option Params :=
     some { n, k }
   else none
 
-/-- `equihash 0.3.0`'s `Params::new` (`src/params.rs`, lines 9–20): the first four of the
-    checks `new?` makes, without `n ≤ 512` and the bounds on `n / (k + 1)`. -/
+/-- `equihash 0.3.0`'s and 0.3.1's `Params::new` (`src/params.rs`, lines 9–20 in both): the
+    first four of the checks `new?` makes, without `n ≤ 512` and the bounds on `n / (k + 1)`. -/
 def newUnbounded? (n k : ℕ) : Option Params :=
   if n % 8 = 0 ∧ k ≥ 3 ∧ k < n ∧ n % (k + 1) = 0 then
     some { n, k }

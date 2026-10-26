@@ -25,7 +25,11 @@ closure leaves them, or `none` where it panics. `sort_unstable` is `List.mergeSo
 sort, and a list of numbers has one sorted order, so which algorithm sorts does not matter.
 Rust's subtractions `leaf + 1 - (1 << height)` and `right_start - (1 << height)` cannot
 underflow, since bits `0 .. height` of `leaf` are set; `leaf >> height` and `1 << height` cannot
-overflow, since `leaf < 2^k` keeps `height ≤ k`, and `Params::new` keeps `k ≤ 63`.
+overflow, since `leaf < 2^k` keeps `height ≤ k`, and `solution_indices` is `None` unless
+`k ≤ 63`. The first batch divides each index by `per_hash` (line 328), which panics when it is
+zero, that is, when `n > 512`: Zakura's `Params::new` rejects those, `equihash 0.3.1`'s does
+not. The division is reached whenever the batch loop runs, which it does once `2^k` indices
+were counted, so the panic stands before the loop.
 `row[i] = …` panics out of bounds, as `set?` does. `*block = …` writes through `iter_mut`, which
 indexes nothing, so it is `bs.set j` with `j` below `bs.len()`. -/
 def validateTree? (p : Params) (indices : List ℕ)
@@ -47,6 +51,7 @@ def validateTree? (p : Params) (indices : List ℕ)
   let mut row := List.replicate rowLen 0
   let mut blocks := List.replicate HASH_BATCH 0
   let mut digests := List.replicate HASH_BATCH (List.replicate 64 0)
+  let () ← (guard (perHash ≠ 0) : Option Unit)
   for (chunk, batch) in (← chunks? indices HASH_BATCH).zipIdx do
     -- `&mut blocks[..chunk.len()]` and `&mut digests[..chunk.len()]`.
     let mut bs := blocks.take chunk.length

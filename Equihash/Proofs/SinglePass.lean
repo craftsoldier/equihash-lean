@@ -423,6 +423,7 @@ theorem validateTree?_eqE (p : Params) (indices : List ℕ)
       (if p.solutionIndices? ≠ some indices.length then throw .InvalidParams else do
         let sorted := indices.mergeSort
         let allDistinct := (sorted.zip sorted.tail).all fun (a, b) => a != b
+        let () ← (guard (p.indicesPerHashOutput ≠ 0) : Option Unit)
         let s ← forIn (← chunks? indices HASH_BATCH).zipIdx
           (List.replicate ((p.k + 1) * p.hashLength) 0, List.replicate p.hashLength 0,
             List.replicate HASH_BATCH 0, List.replicate HASH_BATCH (List.replicate 64 0))
@@ -521,6 +522,7 @@ theorem validateTree?_eq (p : Params) (indices : List ℕ)
       (if p.solutionIndices? ≠ some indices.length then none else do
         let sorted := indices.mergeSort
         let allDistinct := (sorted.zip sorted.tail).all fun (a, b) => a != b
+        let () ← (guard (p.indicesPerHashOutput ≠ 0) : Option Unit)
         let s ← forIn (← chunks? indices HASH_BATCH).zipIdx
           (List.replicate ((p.k + 1) * p.hashLength) 0, List.replicate p.hashLength 0,
             List.replicate HASH_BATCH 0, List.replicate HASH_BATCH (List.replicate 64 0))
@@ -1055,24 +1057,36 @@ theorem length_digest (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toPar
   simp only [genHashParams] at hle ⊢
   omega
 
+/-- A digest's bytes past the digest length are zero. -/
+theorem drop_digest (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S st)
+    {D : ℕ → List ℕ} (hD : ∀ b, D b = generateHash st b ++ List.replicate (64 - rp.hashOutput) 0)
+    (b : ℕ) : (D b).drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0 := by
+  have hl : (generateHash st b).length = rp.hashOutput := by
+    rw [generateHash_eq hst, List.length_map, List.Vector.toList_length, Params.hashOutput_eq h]
+    rfl
+  rw [hD, ← hl, List.drop_left]
+
 theorem batchPass_spec (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S st)
     {D : ℕ → List ℕ} (hD : ∀ b, D b = generateHash st b ++ List.replicate (64 - rp.hashOutput) 0)
     {hash : List ℕ → List (List ℕ) → Option (List (List ℕ))}
-    (hhash : ∀ bs ds, ds.length = bs.length → (∀ d ∈ ds, d.length = 64) →
+    (hhash : ∀ bs ds, ds.length = bs.length →
+      (∀ d ∈ ds, d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0) →
       hash bs ds = some (bs.map D))
     (hL : L.length = 2 ^ p.k) {allDistinct : Bool} (hAD : allDistinct = true → L.Nodup)
     {b : ℕ} (hb : b * 64 < L.length) {pending row blocks : List ℕ} {digests : List (List ℕ)}
     (hP : PendingRel p S L (b * 64) pending)
     (hrow : row.length = (p.k + 1) * ((p.digitBits + 7) / 8))
     (hbl : blocks.length = 64) (hdl : digests.length = 64)
-    (hd64 : ∀ d ∈ digests, d.length = 64) :
+    (hd64 : ∀ d ∈ digests,
+      d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0) :
     ((∀ i < ((L.drop (b * 64)).take 64).length,
         LeafGood Blake2b.hashFn p.toParams S L (b * 64 + i)) →
       ∃ s, batchPass rp L allDistinct hash ((L.drop (b * 64)).take 64, b)
           (pending, row, blocks, digests) = some (.yield s) ∧
         PendingRel p S L (b * 64 + ((L.drop (b * 64)).take 64).length) s.1 ∧
         s.2.1.length = (p.k + 1) * ((p.digitBits + 7) / 8) ∧ s.2.2.1.length = 64 ∧
-        s.2.2.2.length = 64 ∧ ∀ d ∈ s.2.2.2, d.length = 64) ∧
+        s.2.2.2.length = 64 ∧ ∀ d ∈ s.2.2.2,
+          d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0) ∧
     ((∃ i < ((L.drop (b * 64)).take 64).length,
         ¬ LeafGood Blake2b.hashFn p.toParams S L (b * 64 + i)) →
       batchPass rp L allDistinct hash ((L.drop (b * 64)).take 64, b)
@@ -1130,7 +1144,7 @@ theorem batchPass_spec (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toPa
     · intro d hd
       rcases List.mem_append.mp hd with hd | hd
       · obtain ⟨i, -, rfl⟩ := List.mem_map.mp hd
-        exact length_digest h hst hD _
+        exact ⟨length_digest h hst hD _, drop_digest h hst hD _⟩
       · exact hd64 d (List.mem_of_mem_drop hd)
   · intro hbad
     rw [hspec.2 hbad]
@@ -1161,7 +1175,8 @@ theorem Params.solutionIndices?_eq (h : rp.Is p) : rp.solutionIndices? = some (2
 theorem validateTree?_iff (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S st)
     {D : ℕ → List ℕ} (hD : ∀ b, D b = generateHash st b ++ List.replicate (64 - rp.hashOutput) 0)
     {hash : List ℕ → List (List ℕ) → Option (List (List ℕ))}
-    (hhash : ∀ bs ds, ds.length = bs.length → (∀ d ∈ ds, d.length = 64) →
+    (hhash : ∀ bs ds, ds.length = bs.length →
+      (∀ d ∈ ds, d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0) →
       hash bs ds = some (bs.map D))
     (hL : L.length = 2 ^ p.k) :
     (validateTree? rp L hash).run = some (.ok ()) ↔
@@ -1169,8 +1184,11 @@ theorem validateTree?_iff (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.t
         (rest p S p.k L).take p.digitBits = zeros p.digitBits := by
   have hc8 : 8 ≤ p.digitBits := p.digit_ge
   have hAD := @nodup_of_allDistinct L
+  have hm0 : rp.indicesPerHashOutput ≠ 0 := by
+    rw [Params.indicesPerHashOutput_eq h]; have := one_le_m p.toParams; omega
   rw [← erase_eq_some, validateTree?_eq, Params.solutionIndices?_eq h, hL]
-  simp only [ne_eq, not_true_eq_false, ↓reduceIte, Option.bind_eq_bind,
+  simp only [ne_eq, not_true_eq_false, ↓reduceIte, hm0, not_false_eq_true, guard_true,
+    Option.pure_def, Option.bind_eq_bind,
     show chunks? L HASH_BATCH = some (chunksSucc 63 L) from rfl, Option.bind_some,
     Params.hashLength_eq h, Params.collisionByteLength_eq h, h.2]
   generalize hw : (p.digitBits + 7) / 8 = w at *
@@ -1182,13 +1200,15 @@ theorem validateTree?_iff (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.t
     (batchPass rp L ((L.mergeSort.zip L.mergeSort.tail).all fun (a, b) => a != b) hash)
     (fun b s => PendingRel p S L (min (b * 64) L.length) s.1 ∧
       s.2.1.length = (p.k + 1) * w ∧ s.2.2.1.length = 64 ∧ s.2.2.2.length = 64 ∧
-      ∀ d ∈ s.2.2.2, d.length = 64)
+      ∀ d ∈ s.2.2.2, d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0)
     (fun b => ∀ i < ((L.drop (b * 64)).take 64).length,
       LeafGood Blake2b.hashFn p.toParams S L (b * 64 + i)) 0
     (List.replicate ((p.k + 1) * ((p.k + 1) * w)) 0, List.replicate ((p.k + 1) * w) 0,
       List.replicate HASH_BATCH 0, List.replicate HASH_BATCH (List.replicate 64 0))
     ⟨⟨by simp [← hw], fun h' _ hb => by simp at hb⟩, by simp, by simp [HASH_BATCH],
-      by simp [HASH_BATCH], fun d hd => by simp [List.eq_of_mem_replicate hd]⟩
+      by simp [HASH_BATCH], fun d hd => by
+        rw [List.eq_of_mem_replicate hd]
+        simp only [List.length_replicate, List.drop_replicate, and_self]⟩
     (fun b hb s hs => by
       simp only [List.length_zipIdx] at hb
       obtain ⟨pending, row, blocks, digests⟩ := s
@@ -1249,7 +1269,7 @@ theorem validateTree?_iff (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.t
     rw [List.take_of_length_le hsl.le, List.eq_replicate_iff] at hz
     simp only [hG, true_and, ← hz, hsl]
     by_cases hr : (slot p s.1 p.k).all (· == 0) = true
-    · simp only [hr, ↓reduceIte, Option.pure_def, true_iff]
+    · simp only [hr, ↓reduceIte, true_iff]
       intro b hb; simpa using List.all_eq_true.mp hr b hb
     · simp only [hr, Bool.false_eq_true, ↓reduceIte, reduceCtorEq, false_iff, not_forall]
       simpa [List.all_eq_true] using hr
