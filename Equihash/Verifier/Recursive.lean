@@ -24,8 +24,9 @@ structure Node where
   hash : List ℕ
   indices : List ℕ
 
-/-- `initialise_state` (lines 136–145; 0.3.0: 119–128): BLAKE2b with a `digest_len`-byte
-    output, personalized by `"ZcashPoW" ‖ n ‖ k`. `write_all` on a `Vec` appends and never fails. -/
+/-- `initialise_state` (lines 136–145; 0.3.0: 119–128; 0.3.1: 129–138): BLAKE2b with a
+    `digest_len`-byte output, personalized by `"ZcashPoW" ‖ n ‖ k`. `write_all` on a `Vec`
+    appends and never fails. -/
 def initialiseState? (n k digestLen : ℕ) : Option Blake2b.State := do
   let mut personalization := BLAKE2B_PERSONALIZATION_PREFIX
   personalization := personalization ++ u32ToLeBytes n
@@ -34,8 +35,9 @@ def initialiseState? (n k digestLen : ℕ) : Option Blake2b.State := do
   let params ← params.personal? personalization
   return params.toState
 
-/-- `generate_hash` (lines 148–155; 0.3.0: 130–137): the hash of the state's input followed
-    by `i`, little-endian. `write_all` fills `lei`, four bytes, with `i.to_le_bytes()`. -/
+/-- `generate_hash` (lines 148–155; 0.3.0: 130–137; 0.3.1: 140–147): the hash of the state's
+    input followed by `i`, little-endian. `write_all` fills `lei`, four bytes, with
+    `i.to_le_bytes()`. -/
 def generateHash (baseState : Blake2b.State) (i : ℕ) : List ℕ :=
   let lei := u32ToLeBytes i
   let state := baseState.update lei

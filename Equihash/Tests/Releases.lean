@@ -1,7 +1,7 @@
 /-
 Each release's `is_valid_solution` on the two real blocks of `Tests/Spec.lean`, and the cases of
 the crate's own tests of it (`src/verify.rs`), with the error the crate expects: first
-`zakura-equihash 4.0.0`, then `equihash 0.3.0`.
+`zakura-equihash 4.0.0`, then `equihash 0.3.0`, then `equihash 0.3.1`.
 -/
 import Equihash.Tests.Verifier
 
@@ -126,4 +126,60 @@ def allBitsSolution : List ℕ := [
 #guard (isValidSolution_equihash_0_3_0? 48 7 blockHeader blockNonce (List.replicate 112 0)).run =
   none
 #guard (isValidSolution_equihash_0_3_0? 104 3 blockHeader blockNonce (List.replicate 27 0)).run =
+  none
+
+/-! ## `equihash 0.3.1` -/
+
+-- `zcash_block_headers` (`src/verify.rs`, lines 329–362): the mainnet and Regtest blocks are
+-- valid, also with the whole prefix as `input`; any one bit of either solution flipped is
+-- rejected.
+#guard (isValidSolution_equihash_0_3_1? 200 9 blockHeader blockNonce solution).run =
+  some (.ok ())
+#guard (isValidSolution_equihash_0_3_1? 200 9 (blockHeader ++ blockNonce) [] solution).run =
+  some (.ok ())
+#guard (List.range (solution.length * 8)).all fun i =>
+  isErr (isValidSolution_equihash_0_3_1? 200 9 blockHeader blockNonce
+    (solution.set (i / 8) (solution[i / 8]! ^^^ 1 <<< (i % 8)))).run
+#guard (isValidSolution_equihash_0_3_1? 48 5 regtestHeader regtestNonce regtestSolution).run =
+  some (.ok ())
+#guard (isValidSolution_equihash_0_3_1? 48 5 (regtestHeader ++ regtestNonce) []
+  regtestSolution).run = some (.ok ())
+#guard (List.range (regtestSolution.length * 8)).all fun i =>
+  isErr (isValidSolution_equihash_0_3_1? 48 5 regtestHeader regtestNonce
+    (regtestSolution.set (i / 8) (regtestSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
+
+-- `all_bits_matter` (lines 365–391): valid with a 72-byte input, hashed with `blake2b_simd`, as
+-- the leaf hasher takes only 140-byte prefixes; any one bit of the solution flipped is rejected.
+#guard (isValidSolution_equihash_0_3_1? 96 5 allBitsInput (nonce [1]) allBitsSolution).run =
+  some (.ok ())
+#guard (List.range (allBitsSolution.length * 8)).all fun i =>
+  isErr (isValidSolution_equihash_0_3_1? 96 5 allBitsInput (nonce [1])
+    (allBitsSolution.set (i / 8) (allBitsSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
+
+-- The `blake2b_simd` path on the mainnet block: a prefix one byte short or long is not a length
+-- the verifier refuses, as Zakura does, but one its solution fails for.
+#guard (isValidSolution_equihash_0_3_1? 200 9 (blockHeader.take 107) blockNonce solution).run =
+  some (.error .Collision)
+#guard (isValidSolution_equihash_0_3_1? 200 9 (blockHeader ++ [0]) blockNonce solution).run =
+  some (.error .Collision)
+
+-- `solution_length_overflow_is_rejected` (`src/minimal.rs`, lines 170–175): `(512, 63)`, whose
+-- solution length overflows, passes `Params::new` and fails `indices_from_minimal`.
+#guard (Params.newUnbounded? 512 63).isSome
+#guard Params.solutionBytes? ⟨512, 63⟩ = none
+#guard [[], [0]].all fun soln => indicesFromMinimal? ⟨512, 63⟩ soln == some none
+#guard (isValidSolution_equihash_0_3_1? 512 63 blockHeader blockNonce []).run =
+  some (.error .InvalidParams)
+
+-- The lengths 0.3.0 wraps (`isValidSolution_equihash_0_3_1?_448_63` and `_520_64`): rejected.
+#guard (isValidSolution_equihash_0_3_1? 448 63 blockHeader blockNonce []).run =
+  some (.error .InvalidParams)
+#guard (isValidSolution_equihash_0_3_1? 520 64 blockHeader blockNonce [0]).run =
+  some (.error .InvalidParams)
+
+-- Parameters `Params::new` accepts and Zakura's rejects still panic on a solution of the length
+-- they expect, as in 0.3.0.
+#guard (isValidSolution_equihash_0_3_1? 48 7 blockHeader blockNonce (List.replicate 112 0)).run =
+  none
+#guard (isValidSolution_equihash_0_3_1? 104 3 blockHeader blockNonce (List.replicate 27 0)).run =
   none

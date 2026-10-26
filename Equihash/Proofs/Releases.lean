@@ -1,9 +1,10 @@
 /-
 Each release's `is_valid_solution` is correct: it returns `Ok(())` exactly for the solution bytes
 that encode a §7.7.1-valid solution with no repeated index; `zakura-equihash 4.0.0` on a 140-byte
-`input ‖ nonce`, `equihash 0.3.0` on one of any length. And `equihash 0.3.0`'s length check wraps
-where Zakura's checks for overflow, so that for `(448, 63)` and `(520, 64)` it accepts a solution
-of the wrong length, and the verifier then panics.
+`input ‖ nonce`, `equihash 0.3.0` and `0.3.1` on one of any length. And `equihash 0.3.0`'s length
+check wraps where Zakura's checks for overflow, so that for `(448, 63)` and `(520, 64)` it accepts
+a solution of the wrong length, and the verifier then panics; `0.3.1` rejects every solution for
+them.
 -/
 module
 
@@ -274,7 +275,8 @@ theorem isValidSolution?_correct (n k : ℕ) (input nonce soln : List ℕ) (hin 
   rw [(validateTree?_iff h hst (D := fun b =>
       Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
         List.replicate (64 - rp.hashOutput) 0)
-    (fun b => by rw [generateHash_blake2b h hst₀]) (fun bs ds hl hd => hhash bs ds hl hd) hL).trans
+    (fun b => by rw [generateHash_blake2b h hst₀])
+    (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
     (good_iff_validSolution _ _ _ _ hL hbound)]
   exact decoded_iff p soln _ hBL
 
@@ -297,7 +299,8 @@ theorem validateTree?_iff_recursive {rp : Params} {p : ZakuraParams} (h : rp.Is 
   exact (validateTree?_iff h hst (D := fun b =>
       Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
         List.replicate (64 - rp.hashOutput) 0)
-    (fun b => by rw [generateHash_blake2b h hst₀]) (fun bs ds hl hd => hhash bs ds hl hd) hL).trans
+    (fun b => by rw [generateHash_blake2b h hst₀])
+    (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
     (isValidSolutionRecursive?_iff h input nonce L hin hnon hL).symm
 
 /-! ## Zcash's parameters -/
@@ -504,6 +507,157 @@ theorem isValidSolution_equihash_0_3_0?_520_64 (input nonce : List ℕ) (b : ℕ
   simp only [monadLift_some, pure_bind]
   rfl
 
+/-! ## `equihash 0.3.1` -/
+
+/-- `LeafHasher::new` is `None` unless `input ‖ nonce` is 140 bytes. -/
+theorem LeafHasher.new?_of_ne (rp : Params) (input nonce : List ℕ)
+    (hlen : input.length + nonce.length ≠ 140) : LeafHasher.new? rp input nonce = some none := by
+  simp [LeafHasher.new?, Midstate.new?_eq, LeafHash.HEADER_BYTES, LeafHash.NONCE_BYTES, hlen]
+
+/-- The `blake2b_simd` closure gives each block the digest `generate_hash` computes, zero-padded
+    to 64 bytes, on digests whose bytes past the digest length are zero. -/
+theorem blake2bSimdHash?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S : List Byte}
+    {st : Blake2b.State} (hst : StateFor p.toParams S st) (bs : List ℕ) (ds : List (List ℕ))
+    (hl : ds.length = bs.length)
+    (hd : ∀ d ∈ ds, d.length = 64 ∧ d.drop rp.hashOutput = List.replicate (64 - rp.hashOutput) 0) :
+    blake2bSimdHash? st bs ds =
+      some (bs.map fun b => generateHash st b ++ List.replicate (64 - rp.hashOutput) 0) := by
+  have hlen : ∀ b, (generateHash st b).length = rp.hashOutput := fun b => by
+    rw [generateHash_eq hst, List.length_map, List.Vector.toList_length, Params.hashOutput_eq h]
+    rfl
+  simp only [blake2bSimdHash?, hlen, List.drop_of_length_le hl.le, List.append_nil,
+    Option.pure_def, Option.some.injEq]
+  induction bs generalizing ds with
+  | nil => simp
+  | cons b bs ih =>
+    rcases ds with _ | ⟨d, ds⟩
+    · simp at hl
+    simp only [List.zip_cons_cons, List.map_cons, List.cons.injEq]
+    exact ⟨by rw [(hd d (by simp)).2],
+      ih ds (by simpa using hl) fun d' hd' => hd d' (by simp [hd'])⟩
+
+/-- **`equihash 0.3.1`'s `is_valid_solution` is correct**, for parameters Zakura accepts and an
+    `input ‖ nonce` of any length: it returns `Ok(())` exactly when the solutions are under
+    `2^64` bits long and the solution bytes encode a solution valid by §7.7.1, for
+    `powheader = input ‖ nonce` under BLAKE2b, with no repeated index. On a 140-byte
+    `input ‖ nonce` the leaf hasher computes BLAKE2b; on any other, `blake2b_simd` is assumed to. -/
+theorem isValidSolution_equihash_0_3_1?_correct (p : ZakuraParams) (input nonce soln : List ℕ)
+    (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
+    (isValidSolution_equihash_0_3_1? p.n p.k input nonce soln).run = some (.ok ()) ↔
+      2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 ∧
+      ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
+        ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup := by
+  have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
+  unfold isValidSolution_equihash_0_3_1?
+  rw [Params.newUnbounded?_zakura]
+  dsimp only
+  rw [indicesFromMinimal?_spec h soln hsoln, Params.solutionBytes?_eq h]
+  simp only [monadLift_some, pure_bind]
+  set B := bitsOfBytes (bytesOf soln) with hB
+  have hBl : B.length = 8 * soln.length := by simp [hB, length_bitsOfBytes]
+  by_cases hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64
+  swap
+  · simp only [hov, ↓reduceIte, Option.bind_none, run_throw, Option.some.injEq, reduceCtorEq,
+      false_and, iff_self]
+  simp only [hov, ↓reduceIte, Option.bind_some, true_and]
+  obtain ⟨r, hr⟩ : 8 ∣ 2 ^ p.k * (p.digitBits + 1) := by
+    have := p.k_ge
+    exact Dvd.dvd.mul_right ⟨2 ^ (p.k - 3), by
+      rw [show (8 : ℕ) = 2 ^ 3 by norm_num, ← Nat.pow_add, show 3 + (p.k - 3) = p.k by omega]⟩ _
+  rw [hr, Nat.mul_div_cancel_left _ (by norm_num)]
+  by_cases hl : soln.length = r
+  swap
+  · -- A solution of the wrong length.
+    simp only [hl, ↓reduceIte, run_throw, Option.some.injEq, reduceCtorEq, false_iff, not_exists,
+      not_and]
+    intro i hE hV _
+    have := (digits_of_encodes _ _ i hE fun j hj => hV.bounds j hj).1
+    rw [← hB, hBl, hV.length, hr] at this
+    omega
+  simp only [hl, ↓reduceIte]
+  -- The decoded indices.
+  set L := (List.range (2 ^ p.k)).map (digitVal (p.digitBits + 1) B) with hLdef
+  have hL : L.length = 2 ^ p.k := by simp [hLdef]
+  have hBL : B.length = 2 ^ p.k * (p.digitBits + 1) := by rw [hBl, hl, hr]
+  have hbound : ∀ j ∈ L, j < p.N := by
+    intro j hj
+    obtain ⟨t, -, rfl⟩ := List.mem_map.mp hj
+    exact digitVal_lt _ _ _
+  -- The state `blake2b_simd` would hash from.
+  obtain ⟨st₀, hst₀eq, hst₀⟩ := initialiseState?_spec h
+  have hst : StateFor p.toParams (bytesOf (input ++ nonce)) ((st₀.update input).update nonce) := by
+    simpa [List.map_append] using (hst₀.update input hin).update nonce hnon
+  by_cases h140 : input.length + nonce.length = 140
+  · -- The leaf hasher.
+    obtain ⟨lh, hlh, hhash⟩ := leafHasher_spec h input nonce hin hnon h140
+    rw [hlh]
+    simp only [monadLift_some, pure_bind]
+    rw [(validateTree?_iff h hst (D := fun b =>
+        Blake2b.blake2b (⟨p.n, p.k⟩ : Params).hashOutput (personalOf ⟨p.n, p.k⟩)
+          (input ++ nonce ++ u32ToLeBytes b) ++
+          List.replicate (64 - (⟨p.n, p.k⟩ : Params).hashOutput) 0)
+      (fun b => by rw [generateHash_blake2b h hst₀])
+      (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
+      (good_iff_validSolution _ _ _ _ hL hbound)]
+    exact decoded_iff p soln _ hBL
+  · -- `blake2b_simd`.
+    rw [LeafHasher.new?_of_ne _ _ _ h140]
+    simp only [monadLift_some, pure_bind]
+    rw [hst₀eq]
+    simp only [monadLift_some, pure_bind]
+    rw [(validateTree?_iff h hst (D := fun b => generateHash ((st₀.update input).update nonce) b ++
+        List.replicate (64 - (⟨p.n, p.k⟩ : Params).hashOutput) 0)
+      (fun b => rfl) (blake2bSimdHash?_spec h hst) hL).trans
+      (good_iff_validSolution _ _ _ _ hL hbound)]
+    exact decoded_iff p soln _ hBL
+
+/-- **`equihash 0.3.1`'s `is_valid_solution(200, 9, …)`** returns `Ok(())` exactly for the
+    1344-byte encodings of §7.7.1-valid solutions with no repeated index, for any input. -/
+theorem isValidSolution_equihash_0_3_1?_zcash (input nonce soln : List ℕ) (hin : Bytes input)
+    (hnon : Bytes nonce) (hsoln : Bytes soln) :
+    (isValidSolution_equihash_0_3_1? 200 9 input nonce soln).run = some (.ok ()) ↔
+      ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
+        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i ∧
+          i.Nodup := by
+  exact (isValidSolution_equihash_0_3_1?_correct zcashParams input nonce soln hin hnon hsoln).trans
+    ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
+
+/-- **`equihash 0.3.1`'s `is_valid_solution(48, 5, …)`**, likewise. -/
+theorem isValidSolution_equihash_0_3_1?_regtest (input nonce soln : List ℕ) (hin : Bytes input)
+    (hnon : Bytes nonce) (hsoln : Bytes soln) :
+    (isValidSolution_equihash_0_3_1? 48 5 input nonce soln).run = some (.ok ()) ↔
+      ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
+        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i ∧
+          i.Nodup := by
+  exact (isValidSolution_equihash_0_3_1?_correct regtestParams input nonce soln hin hnon
+    hsoln).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
+
+/-- **`equihash 0.3.1` checks the solution length for overflow.** Its `Params::new` still
+    accepts `(448, 63)`, whose length 0.3.0 wraps, but `solution_bytes` is `None`, `2^63 · 8`
+    overflowing a `usize`, so every solution is rejected as `InvalidParams`. -/
+theorem isValidSolution_equihash_0_3_1?_448_63 (input nonce soln : List ℕ) :
+    Params.newUnbounded? 448 63 = some ⟨448, 63⟩ ∧ Params.solutionBytes? ⟨448, 63⟩ = none ∧
+      (isValidSolution_equihash_0_3_1? 448 63 input nonce soln).run =
+        some (.error .InvalidParams) := by
+  refine ⟨rfl, rfl, ?_⟩
+  unfold isValidSolution_equihash_0_3_1?
+  rw [show Params.newUnbounded? 448 63 = some ⟨448, 63⟩ from rfl]
+  dsimp only
+  rw [indicesFromMinimal?_eq, show Params.solutionBytes? ⟨448, 63⟩ = none from rfl]
+  rfl
+
+/-- **Likewise `(520, 64)`**: `1 << 64` overflows, so `solution_indices` is `None`. -/
+theorem isValidSolution_equihash_0_3_1?_520_64 (input nonce soln : List ℕ) :
+    Params.newUnbounded? 520 64 = some ⟨520, 64⟩ ∧ Params.solutionIndices? ⟨520, 64⟩ = none ∧
+      (isValidSolution_equihash_0_3_1? 520 64 input nonce soln).run =
+        some (.error .InvalidParams) := by
+  refine ⟨rfl, rfl, ?_⟩
+  unfold isValidSolution_equihash_0_3_1?
+  rw [show Params.newUnbounded? 520 64 = some ⟨520, 64⟩ from rfl]
+  dsimp only
+  rw [indicesFromMinimal?_eq, show Params.solutionBytes? ⟨520, 64⟩ = none from rfl]
+  rfl
+
 -- The build fails if the theorems rest on anything beyond Lean's three axioms.
 /--
 info: 'Equihash.Verifier.isValidSolution?_correct' depends on axioms:
@@ -518,5 +672,12 @@ info: 'Equihash.Verifier.isValidSolution_equihash_0_3_0?_correct' depends on axi
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms isValidSolution_equihash_0_3_0?_correct
+
+/--
+info: 'Equihash.Verifier.isValidSolution_equihash_0_3_1?_correct' depends on axioms:
+[propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms isValidSolution_equihash_0_3_1?_correct
 
 end Equihash.Verifier

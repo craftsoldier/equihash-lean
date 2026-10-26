@@ -11,8 +11,8 @@ module
 
 namespace Equihash.Verifier
 
-/-- `Kind` (`src/verify.rs`, lines 110–118; 0.3.0: 98–105): why a solution failed to verify.
-    `UnsupportedInputLength` is `zakura-equihash`'s alone. -/
+/-- `Kind` (`src/verify.rs`, lines 110–118; 0.3.0: 98–105; 0.3.1: 109–115): why a solution
+    failed to verify. `UnsupportedInputLength` is `zakura-equihash`'s alone. -/
 inductive Kind where
   | InvalidParams
   | Collision
