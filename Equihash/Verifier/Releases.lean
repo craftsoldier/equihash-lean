@@ -21,13 +21,13 @@ public import Equihash.Verifier.SinglePass
 namespace Equihash.Verifier
 
 /-- `zakura-equihash 4.0.0`'s `is_valid_solution` (`src/verify.rs`, lines 269–280) for `soln`, a
-    minimally encoded solution for `input ‖ nonce` with parameters `n` and `k`.
-
-`LeafHasher::new` runs the portable kernel here (see `LeafHasher.new?`). -/
-def isValidSolution? (n k : ℕ) (input nonce soln : List ℕ) : ExceptT Kind Option Unit := do
+    minimally encoded solution for `input ‖ nonce` with parameters `n` and `k`, on a CPU where
+    `Kernel::detect()` picks `kernel` (see `LeafHasher.new?`). -/
+def isValidSolution? (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ) :
+    ExceptT Kind Option Unit := do
   let some p := Params.new? n k | throw .InvalidParams
   let some indices ← indicesFromMinimal? p soln | throw .InvalidParams
-  let some hasher ← LeafHasher.new? p input nonce | throw .UnsupportedInputLength
+  let some hasher ← LeafHasher.new? p input nonce kernel | throw .UnsupportedInputLength
   validateTree? p indices fun blocks digests => hasher.hash? blocks digests
 
 /-- `equihash 0.3.0`'s `is_valid_solution` (`src/verify.rs`, lines 243–255) for `soln`, a
@@ -60,24 +60,26 @@ def blake2bSimdHash? (state : Blake2b.State) (blocks : List ℕ) (digests : List
     hash ++ digest.drop hash.length) ++ digests.drop blocks.length)
 
 /-- `equihash 0.3.1`'s `is_valid_solution` (`src/verify.rs`, lines 258–283) for `soln`, a
-    minimally encoded solution for `input ‖ nonce` of any length, with parameters `n` and `k`.
+    minimally encoded solution for `input ‖ nonce` of any length, with parameters `n` and `k`,
+    on a CPU where `Kernel::detect()` picks `kernel`.
 
 0.3.1 is `zakura-equihash 4.0.0`'s verifier backported: its `src/params.rs`, `src/minimal.rs`,
 `src/leaf_hash.rs` and `src/verify/tree.rs` are Zakura's files, but for visibility, formatting
 and parentheses, `"ZcashPoW"` spelled out in `leaf_hash.rs`, one more test, and the
-`unsafe-verifier` feature, which gates the AVX2 and NEON kernels and is off by default, so that
-a default build runs only the portable kernel, as the Lean does. `src/verify.rs` keeps 0.3.0's
-recursive verifier for tests only, and `Kind` has no `UnsupportedInputLength`. Two differences
-reach `is_valid_solution`: `Params::new` makes 0.3.0's four checks (`src/params.rs`, lines
-9–20; `Params.newUnbounded?`) before Zakura's checked `solution_bytes` (lines 22–28), and
-`LeafHasher::new` returning `None` (`src/leaf_hash.rs`, lines 378–380) is no error: the
-verifier then hashes with `blake2b_simd`, through 0.3.0's `initialise_state` and
-`generate_hash` (lines 129–147), as `is_valid_solution_recursive` does. -/
-def isValidSolution_equihash_0_3_1? (n k : ℕ) (input nonce soln : List ℕ) :
+`unsafe-verifier` feature, which gates the AVX2 and NEON kernels and is off by default: a
+default build compiles only `Kernel::Portable`, so `kernel` is `.portable` for it.
+`src/verify.rs` keeps 0.3.0's recursive verifier for tests only, and `Kind` has no
+`UnsupportedInputLength`. Two differences reach `is_valid_solution`: `Params::new` makes
+0.3.0's four checks (`src/params.rs`, lines 9–20; `Params.newUnbounded?`) before Zakura's
+checked `solution_bytes` (lines 22–28), and `LeafHasher::new` returning `None`
+(`src/leaf_hash.rs`, lines 378–380) is no error: the verifier then hashes with `blake2b_simd`,
+through 0.3.0's `initialise_state` and `generate_hash` (lines 129–147), as
+`is_valid_solution_recursive` does. -/
+def isValidSolution_equihash_0_3_1? (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ) :
     ExceptT Kind Option Unit := do
   let some p := Params.newUnbounded? n k | throw .InvalidParams
   let some indices ← indicesFromMinimal? p soln | throw .InvalidParams
-  if let some hasher ← LeafHasher.new? p input nonce then
+  if let some hasher ← LeafHasher.new? p input nonce kernel then
     return ← validateTree? p indices fun blocks digests => hasher.hash? blocks digests
   let mut state ← initialiseState? p.n p.k p.hashOutput
   state := state.update input
