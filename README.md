@@ -4,8 +4,10 @@ Zcash's proof of work is Equihash. This repository is a Lean 4 proof, release by
 the Equihash verifiers Zcash software runs accept exactly the solutions the Zcash protocol
 specification (§7.7.1) calls valid, with distinct indices. Each theorem states its hypotheses:
 
-- `zakura-equihash` 4.0.0: for a 140-byte header and nonce. The Lean runs the portable
-  leaf-hashing kernel, so it assumes the AVX2/NEON kernels compute the same.
+- `zakura-equihash` 4.0.0: for a 140-byte header and nonce, under each of its leaf-hashing
+  kernels. The portable, AVX2 and NEON kernels are transcribed, the last two on models of the
+  CPU instructions they use, written from Intel's and Arm's documentation; the Lean assumes
+  those models, and that the kernel the CPU detection picks is one the CPU supports.
 - `equihash` 0.3.0: for an input of any length, and the parameters `zakura-equihash` accepts
   whose solutions are under `2^64` bits long, which include Zcash's. It hashes with the
   `blake2b_simd` crate, which it assumes computes BLAKE2b. Outside those parameters its length
@@ -14,21 +16,21 @@ specification (§7.7.1) calls valid, with distinct indices. Each theorem states 
 - `equihash` 0.3.1: for an input of any length, and the parameters `zakura-equihash` accepts,
   which include Zcash's. Its length check is Zakura's, so parameters whose solutions reach `2^64`
   bits are an error, which theorems state for `(448, 63)` and `(520, 64)`. On a 140-byte header
-  and nonce it hashes with Zakura's portable kernel; on any other length with `blake2b_simd`,
-  which it assumes computes BLAKE2b. Built with its `unsafe-verifier` feature, off by default,
-  it would run the AVX2/NEON kernels, assumed as for `zakura-equihash`. 0.3.1 is not on
-  crates.io yet: the source is zcash/librustzcash at its release commit `0ef23a95`.
+  and nonce it hashes with Zakura's kernels, under the same assumptions; its `unsafe-verifier`
+  feature, off by default, enables the AVX2/NEON ones. On any other length it hashes with
+  `blake2b_simd`, which it assumes computes BLAKE2b. 0.3.1 is not on crates.io yet: the source
+  is zcash/librustzcash at its release commit `0ef23a95`.
 
-| Crate             | Version | Status  | Assumes                                   |
-|-------------------|---------|---------|-------------------------------------------|
-| `zakura-equihash` | 4.0.0   | Proven  | AVX2/NEON kernels match the portable one  |
-| `equihash`        | 0.3.0   | Proven  | `blake2b_simd` computes BLAKE2b           |
-| `equihash`        | 0.3.1   | Proven  | `blake2b_simd` except on 140-byte inputs  |
+| Crate             | Version | Status  | Assumes                                            |
+|-------------------|---------|---------|----------------------------------------------------|
+| `zakura-equihash` | 4.0.0   | Proven  | The instruction models match Intel's and Arm's docs |
+| `equihash`        | 0.3.0   | Proven  | `blake2b_simd` computes BLAKE2b                    |
+| `equihash`        | 0.3.1   | Proven  | The models; `blake2b_simd` off 140-byte inputs     |
 
 The Lean distinguishes a Rust panic from an error. Its model of a panic covers the code's own
 checks, indexing and arithmetic in a release build; not running out of memory, overflowing the
-stack, or a panic inside `blake2b_simd` other than its checks of the digest and personalization
-lengths.
+stack, undefined behaviour in the kernels' `unsafe` code, or a panic inside `blake2b_simd` other
+than its checks of the digest and personalization lengths.
 
 ## Verifying the proofs
 

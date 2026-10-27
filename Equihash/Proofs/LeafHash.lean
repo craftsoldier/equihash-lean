@@ -1,10 +1,11 @@
 /-
-The portable leaf hasher computes BLAKE2b: each leaf digest of `LeafHasher` is the BLAKE2b of
-`input ‖ nonce` followed by the block index, as `Verifier/Blake2b.lean` computes it.
+The leaf hasher computes BLAKE2b: each leaf digest of `LeafHasher`, under any kernel, is the
+BLAKE2b of `input ‖ nonce` followed by the block index, as `Verifier/Blake2b.lean` computes it.
+The kernels agree by `Proofs/Kernels.lean`; here the one-lane kernel is BLAKE2b.
 -/
 module
 
-public import Equihash.Verifier.LeafHash
+public import Equihash.Proofs.Kernels
 public import Equihash.Proofs.Decode
 public import Mathlib.Tactic.IntervalCases
 
@@ -16,7 +17,7 @@ open Equihash Equihash.Spec LeafHash
 
 /-! ## The compression function -/
 
-theorem g_eq_mix : LeafHash.g = Blake2b.mix := rfl
+theorem g_eq_mix : LeafHash.g (L := UInt64) = Blake2b.mix := rfl
 
 theorem IV_eq : LeafHash.IV = Blake2b.iv := rfl
 
@@ -220,7 +221,7 @@ theorem compressPrefixBlock_eq (h : Array UInt64) (hh : h.size = 8) (block : Lis
     show UInt64.ofNat (128 / 2 ^ 64) = 0 from rfl, UInt64.xor_zero, set!_getElem!_self, IV_eq]
   rw [rounds_congr _ (w₂ := Blake2b.word block) fun i hi => by
     rw [getElem!_words _ hi, u64FromLeBytes_eq_word]]
-  generalize rounds _ _ = v
+  generalize rounds (L := UInt64) _ _ = v
   exact forIn_finalize h v hh
 
 /-! ## The final block -/
@@ -294,13 +295,14 @@ theorem Midstate.compress_eq_blake2b (self : Midstate) (hh : self.h.size = 8) (t
     (hm0 : self.m0 = u64FromLeBytes (tail.take 8))
     (hm1 : self.m1Low = UInt64.ofNat (u32FromLeBytes ((tail.drop 8).take 4)))
     (hc : self.count = UInt64.ofNat 144) (b : ℕ) (digest : List ℕ) (hd : digest.length = 64) :
-    self.compress b digest = (List.range 64).map fun q =>
+    self.compress (L := UInt64) [b] [digest] = [(List.range 64).map fun q =>
       ((Blake2b.compress self.h (tail ++ u32ToLeBytes b) 144 true)[q / 8]! >>>
-        UInt64.ofNat (8 * (q % 8))).toNat % 256 := by
-  rw [compress_eq]
-  simp only [Midstate.compress, Std.Legacy.Range.forIn_eq_forIn_range', Std.Legacy.Range.size,
-    List.forIn_pure_yield_eq_foldl, pure_bind, Id.run_pure, Nat.sub_zero, Nat.add_sub_cancel,
-    Nat.div_one, ↓reduceIte]
+        UInt64.ofNat (8 * (q % 8))).toNat % 256] := by
+  rw [Midstate.compress_u64, compress_eq]
+  refine congrArg (fun d => [d]) ?_
+  simp only [laneDigest, laneRounds, Std.Legacy.Range.forIn_eq_forIn_range',
+    Std.Legacy.Range.size, List.forIn_pure_yield_eq_foldl, Id.run_bind, Id.run_pure, Nat.sub_zero,
+    Nat.add_sub_cancel, Nat.div_one, ↓reduceIte]
   -- The working vector: `h`, then the IV with the byte count and the final-block flag.
   have hinit := foldl_init self.h 8 0 (Array.replicate 16 0) (by omega) (by simp)
   have hsize : ((List.range' 0 8).foldl (fun v i => (v.set! i self.h[i]!).set! (8 + i) IV[i]!)
@@ -378,7 +380,7 @@ theorem Midstate.compress_eq_blake2b (self : Midstate) (hh : self.h.size = 8) (t
         · simp [hj]
       rw [hz]
       rfl
-  generalize rounds _ _ = v
+  generalize rounds (L := UInt64) _ _ = v
   -- The digest: the eight state words, little-endian.
   obtain ⟨-, hdig⟩ := foldl_digest (fun i => self.h[i]! ^^^ (v[i]! ^^^ v[i + 8]!)) 8 0 digest
     (by omega) hd
@@ -654,11 +656,13 @@ theorem take_map_range (f : ℕ → ℕ) (n : ℕ) (hn : n ≤ 64) :
   simp
 
 /-- **The leaf hasher computes BLAKE2b.** For a 140-byte `input ‖ nonce` and parameters Zakura
-    accepts, `LeafHasher` gives each block index `b` the BLAKE2b digest of `input ‖ nonce`
-    followed by `b`, personalized by `"ZcashPoW" ‖ n ‖ k`, zero-padded to 64 bytes. -/
+    accepts, `LeafHasher` with any kernel gives each block index `b` the BLAKE2b digest of
+    `input ‖ nonce` followed by `b`, personalized by `"ZcashPoW" ‖ n ‖ k`, zero-padded to 64
+    bytes. -/
 theorem leafHasher_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) (input nonce : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hlen : input.length + nonce.length = 140) :
-    ∃ lh, LeafHasher.new? rp input nonce = some (some lh) ∧
+    (hin : Bytes input) (hnon : Bytes nonce) (hlen : input.length + nonce.length = 140)
+    (kernel : Kernel) :
+    ∃ lh, LeafHasher.new? rp input nonce kernel = some (some lh) ∧
       ∀ bs ds, ds.length = bs.length → (∀ d ∈ ds, d.length = 64) →
         lh.hash? bs ds = some (bs.map fun b =>
           Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
@@ -669,7 +673,8 @@ theorem leafHasher_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) (input no
   have ho : rp.hashOutput ≤ 64 := by
     rw [Params.hashOutput_eq h]; exact genHashParams_len_le p.toParams
   obtain ⟨ms, hms, hmh, hm0, hm1, hc⟩ := Midstate.new?_spec rp input nonce hlen
-  refine ⟨⟨ms, rp.hashOutput⟩, by simp [LeafHasher.new?, hms], fun bs ds hl hd => ?_⟩
+  refine ⟨⟨ms, kernel, rp.hashOutput⟩, by simp [LeafHasher.new?, LeafHasher.withKernel?, hms],
+    fun bs ds hl hd => ?_⟩
   -- The prefix: its first block is compressed, its last 12 bytes are the tail.
   set P := input ++ nonce with hP
   have hPl : P.length = 140 := by simp [hP, hlen]
@@ -681,31 +686,29 @@ theorem leafHasher_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) (input no
   have hhs : ms.h.size = 8 := by rw [hmh']; exact size_compress _ _ _ _
   -- Each digest.
   have hdig : ∀ b d, d.length = 64 →
-      (ms.compress b d).take rp.hashOutput ++
-        List.replicate ((ms.compress b d).length - rp.hashOutput) 0 =
-      Blake2b.blake2b rp.hashOutput (personalOf rp) (P ++ u32ToLeBytes b) ++
-        List.replicate (64 - rp.hashOutput) 0 := by
+      (ms.compress (L := UInt64) [b] [d]).map (fun digest =>
+        digest.take rp.hashOutput ++ List.replicate (digest.length - rp.hashOutput) 0) =
+      [Blake2b.blake2b rp.hashOutput (personalOf rp) (P ++ u32ToLeBytes b) ++
+        List.replicate (64 - rp.hashOutput) 0] := by
     intro b d hd64
     rw [Midstate.compress_eq_blake2b ms hhs (P.drop 128) (by simp [hPl])
-      (fun x hx => hPb x (List.mem_of_mem_drop hx)) hm0 hm1 hc b d hd64, take_map_range _ _ ho,
-      List.length_map, List.length_range, Blake2b.blake2b,
+      (fun x hx => hPb x (List.mem_of_mem_drop hx)) hm0 hm1 hc b d hd64, List.map_singleton,
+      take_map_range _ _ ho, List.length_map, List.length_range, Blake2b.blake2b,
       finalState_144 rp.hashOutput (personalOf rp) (P ++ u32ToLeBytes b)
         (by simp [hPl, u32ToLeBytes]),
       List.take_append_of_le_length (by omega : 128 ≤ P.length),
       List.drop_append_of_le_length (by omega : 128 ≤ P.length), hmh']
-  -- The batch: one lane, so every block is hashed by the portable kernel.
-  simp only [LeafHasher.hash?, hl, guard_true, Nat.div_one, Nat.mul_one, List.take_length,
-    List.drop_length, Option.pure_def, Option.bind_eq_bind, Option.bind_some,
-    Midstate.compressPortable, List.zip_nil_left, List.map_nil, List.append_nil,
-    List.take_of_length_le (show ds.length ≤ bs.length by omega)]
-  congr 1
+  -- The batch: every kernel hashes each block as the one-lane kernel does.
+  rw [LeafHasher.hash?_eq _ _ _ hl.symm]
+  refine congrArg some ?_
+  simp only [Midstate.compressPortable]
   induction bs generalizing ds with
   | nil => cases ds <;> simp
   | cons b bs ih =>
     rcases ds with _ | ⟨d, ds⟩
     · simp at hl
-    · simp only [List.zip_cons_cons, List.map_cons, List.cons.injEq]
-      exact ⟨hdig b d (hd d (by simp)), ih ds (by simpa using hl)
-        (fun d' hd' => hd d' (by simp [hd']))⟩
+    · rw [List.zip_cons_cons, List.flatMap_cons, List.map_append, hdig b d (hd d (by simp)),
+        List.map_cons, List.singleton_append, List.cons.injEq]
+      exact ⟨rfl, ih ds (by simpa using hl) (fun d' hd' => hd d' (by simp [hd']))⟩
 
 end Equihash.Verifier
