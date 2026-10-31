@@ -155,7 +155,14 @@ theorem Node.new?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S : List 
   -- Their expansion.
   have hdiv : p.digitBits ∣ 8 * bytes.length := by
     rw [hbl, ← hq]; exact ⟨p.k + 1, by rw [n_eq p.toParams]; ring⟩
-  obtain ⟨out, hout, hlen, hall⟩ := expandArray?_spec bytes hbb p.digitBits 0 hc8 (by omega) hdiv
+  have hfit : 8 * (divCeil p.digitBits 8 + 0) * bytes.length < 2 ^ 64 := by
+    have := p.n_le
+    rw [hbl, divCeil_eq _ _ (by norm_num)]
+    calc 8 * ((p.digitBits + 8 - 1) / 8 + 0) * q ≤ 8 * 3 * 64 :=
+          Nat.mul_le_mul (Nat.mul_le_mul_left _ (by omega)) (by omega)
+      _ < 2 ^ 64 := by norm_num
+  obtain ⟨out, hout, hlen, hall⟩ :=
+    expandArray?_spec bytes hbb p.digitBits 0 hc8 (by omega) hdiv hfit
   have hw : divCeil p.digitBits 8 + 0 = (p.digitBits + 7) / 8 := by
     rw [Nat.add_zero, divCeil_eq _ _ (by norm_num)]; rfl
   rw [hw] at hlen hall

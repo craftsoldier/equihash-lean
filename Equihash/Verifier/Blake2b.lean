@@ -72,8 +72,9 @@ def compress (h : Array UInt64) (block : List ℕ) (t : ℕ) (last : Bool) : Arr
   return (List.range 8).toArray.map fun i => h[i]! ^^^ v[i]! ^^^ v[i + 8]!
 
 /-- The final state of `BLAKE2b` with an `outLen`-byte output, a 16-byte personalization, no
-    key and no salt, after hashing `input` (RFC 7693, §3.3, with the parameter block of
-    §2.5). -/
+    key and no salt, after hashing `input` (RFC 7693, §3.3). RFC 7693's parameter block (§2.5)
+    has no personalization; the block here is `blake2b_simd 1.0.4`'s (`Params::to_words`,
+    `src/lib.rs`, lines 185–204), with the personalization in words 6 and 7. -/
 def finalState (outLen : ℕ) (personal input : List ℕ) : Array UInt64 := Id.run do
   -- Parameter block: digest length, key length 0, fanout 1, depth 1; personalization.
   let mut h := iv
