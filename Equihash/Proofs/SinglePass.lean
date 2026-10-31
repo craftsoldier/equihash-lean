@@ -876,8 +876,14 @@ theorem leafRow (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S 
   have hexp : expandedLen bytes.length rp.collisionBitLength 0 =
       (p.k + 1) * ((p.digitBits + 7) / 8) := by
     have hn : 8 * q = (p.k + 1) * p.digitBits := by rw [← hq]; exact n_eq p.toParams
+    have hfit : 8 * ((p.digitBits + 7) / 8) * q < 2 ^ 64 := by
+      have := p.n_le
+      have hc24 : p.digitBits ≤ 24 := p.digit_le
+      calc 8 * ((p.digitBits + 7) / 8) * q ≤ 8 * 3 * 64 :=
+            Nat.mul_le_mul (Nat.mul_le_mul_left _ (by omega)) (by omega)
+        _ < 2 ^ 64 := by norm_num
     rw [expandedLen, Params.collisionBitLength_eq h, divCeil_eq _ _ (by norm_num), hbl,
-      Nat.add_zero, show p.digitBits + 8 - 1 = p.digitBits + 7 by omega,
+      Nat.add_zero, show p.digitBits + 8 - 1 = p.digitBits + 7 by omega, Nat.mod_eq_of_lt hfit,
       show 8 * ((p.digitBits + 7) / 8) * q = (p.k + 1) * ((p.digitBits + 7) / 8) * p.digitBits by
         calc 8 * ((p.digitBits + 7) / 8) * q = (p.digitBits + 7) / 8 * (8 * q) := by ring
           _ = _ := by rw [hn]; ring]

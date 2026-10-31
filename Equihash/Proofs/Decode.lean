@@ -21,6 +21,14 @@ def readPass (_ : Unit) (s : Cursor × List ℕ) : Option (ForInStep (Cursor × 
   | some (i, csr') => pure (.yield (csr', ret ++ [i]))
   | none => pure (.done (csr, ret))
 
+/-- `solution_bytes`: `2^k·(n/(k+1) + 1)/8`, unless the product overflows a `usize`. -/
+theorem Params.solutionBytes?_eq {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
+    rp.solutionBytes? = if 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 then
+      some (2 ^ p.k * (p.digitBits + 1) / 8) else none := by
+  simp only [Params.solutionBytes?, Params.solutionIndices?_eq h, Option.bind_eq_bind,
+    Option.bind_some, Params.collisionBitLength_eq h, checkedMul?, USIZE_BITS]
+  split_ifs <;> rfl
+
 /-- `indices_from_minimal`, as its loop body. -/
 theorem indicesFromMinimal?_eq (p : Params) (minimal : List ℕ) :
     indicesFromMinimal? p minimal = (match p.solutionBytes? with
@@ -66,11 +74,11 @@ theorem forIn_readPass (out : List ℕ) (n : ℕ) (hlen : out.length = 4 * n) :
       List.range'_succ]
     simp
 
-/-- **`indices_from_minimal`** never panics: a solution of the right length decodes to its
-    `2^k` digits of `n/(k+1) + 1` bits each, read most significant bit first; any other length
-    is `None`. -/
+/-- **`indices_from_minimal`**, for solutions under `2^62` bits, never panics: a solution of
+    the right length decodes to its `2^k` digits of `n/(k+1) + 1` bits each, read most
+    significant bit first; any other length is `None`. -/
 theorem indicesFromMinimal?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p)
-    (minimal : List ℕ) (hb : Bytes minimal) :
+    (minimal : List ℕ) (hb : Bytes minimal) (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) :
     indicesFromMinimal? rp minimal = some (rp.solutionBytes?.bind fun sb =>
       if minimal.length = sb then
         some ((List.range (2 ^ p.k)).map
@@ -103,9 +111,10 @@ theorem indicesFromMinimal?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p)
   have hdc : divCeil (p.digitBits + 1) 8 ≤ 4 := by rw [divCeil_eq _ _ (by norm_num)]; omega
   simp only [hdc, guard_true, Option.pure_def, Option.bind_some]
   -- Expansion: each digit into four big-endian bytes.
+  have hw : divCeil (p.digitBits + 1) 8 + (4 - divCeil (p.digitBits + 1) 8) = 4 := by omega
   obtain ⟨out, hout, hol, hall⟩ := expandArray?_spec minimal hb (p.digitBits + 1)
     (4 - divCeil (p.digitBits + 1) 8) (by omega) (by omega) ⟨2 ^ p.k, by rw [h8, Nat.mul_comm]⟩
-  have hw : divCeil (p.digitBits + 1) 8 + (4 - divCeil (p.digitBits + 1) 8) = 4 := by omega
+    (by rw [hw]; omega)
   have hn : 8 * minimal.length / (p.digitBits + 1) = 2 ^ p.k := by
     rw [h8, Nat.mul_div_cancel _ (by omega)]
   rw [hw, hn] at hall
@@ -146,5 +155,74 @@ theorem indicesFromMinimal?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p)
     · simp [hx, chunk]
   rw [hchunk, show u32FromBeBytes = beNat from rfl, beNat_chunk 4 _ hD, hV,
     digit_eq_digitVal _ _ _ _ hB hfit]
+
+/-- **`indices_from_minimal` panics** on a solution of the right length that is at least `2^62`
+    bits long: `expand_array`'s length `32·L` wraps a `usize`, and `expand_array_into` writes
+    past the short vector. Zakura accepts two such parameter sets, `(480, 59)` and `(488, 60)`;
+    longer solutions are `None` (`solution_bytes` overflows). -/
+theorem indicesFromMinimal?_wraps {rp : Params} {p : ZakuraParams} (h : rp.Is p)
+    (minimal : List ℕ) (hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64)
+    (hbig : 2 ^ 62 ≤ 2 ^ p.k * (p.digitBits + 1))
+    (hl : minimal.length = 2 ^ p.k * (p.digitBits + 1) / 8) :
+    indicesFromMinimal? rp minimal = none := by
+  have hc8 : 8 ≤ p.digitBits := p.digit_ge
+  have hc24 : p.digitBits ≤ 24 := p.digit_le
+  have hn := n_eq p.toParams
+  have hnle := p.n_le
+  -- Only `k ∈ {59, 60}` and `n/(k+1) = 8` reach `2^62` bits.
+  have hk58 : 58 ≤ p.k := by
+    by_contra hk
+    have h1 : 2 ^ p.k ≤ 2 ^ 57 := Nat.pow_le_pow_right (by norm_num) (by omega)
+    have h2 : 2 ^ p.k * (p.digitBits + 1) ≤ 2 ^ 57 * 25 := Nat.mul_le_mul h1 (by omega)
+    have h3 : (2 : ℕ) ^ 57 * 25 < 2 ^ 62 := by norm_num
+    omega
+  have hc : p.digitBits = 8 := by
+    have : 59 * p.digitBits ≤ (p.k + 1) * p.digitBits := Nat.mul_le_mul_right _ (by omega)
+    omega
+  rw [hc] at hov hbig hl
+  have hk : p.k = 59 ∨ p.k = 60 := by
+    have h59 : 59 ≤ p.k := by
+      by_contra hk
+      have h1 : 2 ^ p.k ≤ 2 ^ 58 := Nat.pow_le_pow_right (by norm_num) (by omega)
+      have h3 : (2 : ℕ) ^ 58 * (8 + 1) < 2 ^ 62 := by norm_num
+      have := Nat.mul_le_mul_right (8 + 1) h1
+      omega
+    have h60 : p.k ≤ 60 := by
+      by_contra hk
+      have h1 : 2 ^ 61 ≤ 2 ^ p.k := Nat.pow_le_pow_right (by norm_num) (by omega)
+      have h3 : 2 ^ 64 ≤ (2 : ℕ) ^ 61 * (8 + 1) := by norm_num
+      have := Nat.mul_le_mul_right (8 + 1) h1
+      omega
+    omega
+  rw [indicesFromMinimal?_eq, Params.solutionBytes?_eq h, Params.collisionBitLength_eq h, hc]
+  simp only [hov, ↓reduceIte, hl, ne_eq, not_true_eq_false]
+  have hdc : divCeil (8 + 1) 8 = 2 := by decide
+  simp only [hdc, show 2 ≤ 4 by norm_num, guard_true, Option.pure_def]
+  -- The expansion panics: the wrapped length is shorter than the `2^k·4` bytes it writes.
+  have hexp : expandArray? minimal (8 + 1) (4 - 2) = none := by
+    unfold expandArray?
+    apply expandArrayInto?_short _ _ _ _ (by norm_num) (by norm_num) (by simp)
+    · rw [expandedLen, hl, hdc]
+      rcases hk with hk | hk <;> rw [hk] <;> norm_num
+    · rw [List.length_replicate, expandedLen, hl, hdc]
+      rcases hk with hk | hk <;> rw [hk] <;> norm_num
+  rw [hexp]
+  rfl
+
+/-- For solutions of at least `2^62` bits, `indices_from_minimal` decodes nothing: the length is
+    `None`, or a solution of that length panics (`indicesFromMinimal?_wraps`). -/
+theorem indicesFromMinimal?_ne_of_big {rp : Params} {p : ZakuraParams} (h : rp.Is p)
+    (minimal : List ℕ) (hbig : ¬ 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) (L : List ℕ) :
+    indicesFromMinimal? rp minimal ≠ some (some L) := by
+  by_cases hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64
+  · by_cases hl : minimal.length = 2 ^ p.k * (p.digitBits + 1) / 8
+    · rw [indicesFromMinimal?_wraps h minimal hov (by omega) hl]
+      simp
+    · rw [indicesFromMinimal?_eq, Params.solutionBytes?_eq h,
+        ite_eq_left_of_eq_true _ _ (eq_true hov)]
+      simp [hl]
+  · rw [indicesFromMinimal?_eq, Params.solutionBytes?_eq h,
+      ite_eq_right_of_eq_false _ _ (eq_false hov)]
+    simp
 
 end Equihash.Verifier

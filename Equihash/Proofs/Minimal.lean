@@ -15,19 +15,6 @@ open Equihash
 
 /-! ## The loops, as folds -/
 
-theorem forIn_some_yield {α β : Type} (l : List α) (f : α → β → β) (init : β) :
-    forIn (m := Option) l init (fun a b => some (.yield (f a b))) =
-      some (l.foldl (fun b a => f a b) init) :=
-  List.forIn_pure_yield_eq_foldl f init
-
-/-- A loop whose every pass continues is a fold. -/
-theorem forIn_option_eq {α β : Type} (l : List α) (init : β)
-    (f : α → β → Option (ForInStep β)) (g : α → β → β)
-    (h : ∀ a b, f a b = some (.yield (g a b))) :
-    forIn l init f = some (l.foldl (fun b a => g a b) init) := by
-  rw [show f = fun a b => some (.yield (g a b)) from funext fun a => funext (h a)]
-  exact forIn_some_yield l g init
-
 /-- The inner loop's write: byte `x` of the digit ending at bit `ab` of `acc`, into slot
     `j + x`. -/
 def writeByte (c w j acc ab : ℕ) (vout : List ℕ) (x : ℕ) : List ℕ :=
@@ -137,20 +124,86 @@ theorem foldlM_outerStep? (vin : List ℕ) (c pad len : ℕ) (hc8 : 8 ≤ c)
     · obtain ⟨hq, hr⟩ := hdm.2 (by omega)
       exact ⟨rfl, hl, by rw [h8, hr, hab], by rw [h8, hq, hj]⟩
 
-/-- Past its checks, and unless expansion is a copy, `expand_array_into` writes nothing out of
-    bounds, and folds `outerStep` over the input, from an all-zero output. -/
-theorem expandArrayInto?_eq_fold (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥ 8)
+/-- A write sequence that does not panic keeps the output's length, and wrote in bounds. -/
+theorem foldlM_writeByte?_bound (c w j acc ab : ℕ) (xs vout v : List ℕ)
+    (h : xs.foldlM (writeByte? c w j acc ab) vout = some v) :
+    v.length = vout.length ∧ ∀ x ∈ xs, j + x < vout.length := by
+  induction xs generalizing vout with
+  | nil =>
+    simp only [List.foldlM_nil, Option.pure_def, Option.some.injEq] at h
+    subst h
+    simp
+  | cons x xs ih =>
+    simp only [List.foldlM_cons, writeByte?, set?] at h
+    split_ifs at h with hx
+    · simp only [Option.bind_eq_bind, Option.bind_some] at h
+      obtain ⟨hl, hb⟩ := ih _ h
+      rw [List.length_set] at hl hb
+      exact ⟨hl, fun y hy => (List.mem_cons.mp hy).elim (fun e => e ▸ hx) (hb y)⟩
+    · simp at h
+
+/-- The outer loop panics, into an output shorter than `⌊8L/c⌋·w` bytes: its last write is out
+    of bounds. -/
+theorem foldlM_outerStep?_short (vin : List ℕ) (c pad len : ℕ) (hc8 : 8 ≤ c)
+    (hlen : len < 8 * vin.length / c * (divCeil c 8 + pad)) (init : List ℕ × ℕ × ℕ × ℕ)
+    (hinit : BoundInv c (divCeil c 8 + pad) len 0 init) :
+    vin.foldlM (outerStep? c pad) init = none := by
+  set w := divCeil c 8 + pad with hw
+  have hw1 : pad < w := by
+    have : 1 ≤ divCeil c 8 := by rw [divCeil_eq _ _ (by norm_num)]; omega
+    omega
+  suffices ∀ t ≤ vin.length, ∀ s, (vin.take t).foldlM (outerStep? c pad) init = some s →
+      BoundInv c w len t s ∧ s.2.2.2 ≤ len by
+    rcases hM : vin.foldlM (outerStep? c pad) init with _ | s
+    · rfl
+    obtain ⟨⟨-, -, hj⟩, hle⟩ := this vin.length le_rfl s
+      (by rwa [List.take_of_length_le le_rfl])
+    omega
+  intro t ht
+  induction t with
+  | zero =>
+    intro s hs
+    simp only [List.take_zero, List.foldlM_nil, Option.pure_def, Option.some.injEq] at hs
+    subst hs
+    exact ⟨hinit, by rw [hinit.2.2]; simp⟩
+  | succ t ih =>
+    intro s' hs'
+    rw [List.take_add_one, List.getElem?_eq_getElem (by omega), Option.toList_some,
+      List.foldlM_append] at hs'
+    obtain ⟨s, hM, hstep⟩ := Option.bind_eq_some_iff.mp hs'
+    obtain ⟨⟨hl, hab, hj⟩, hjle⟩ := ih (by omega) s hM
+    simp only [List.foldlM_cons, List.foldlM_nil, Option.bind_eq_bind] at hstep
+    obtain ⟨s'', hs'', hpure⟩ := Option.bind_eq_some_iff.mp hstep
+    simp only [Option.pure_def, Option.some.injEq] at hpure
+    subst hpure
+    have hdm := div_mod_add_eight (8 * t) c hc8
+    have h8 : 8 * (t + 1) = 8 * t + 8 := by ring
+    unfold outerStep? at hs''
+    dsimp only at hs''
+    rw [← hw] at hs''
+    split_ifs at hs'' with hemit
+    · -- A digit completes: its last byte was written in bounds.
+      obtain ⟨hq, hr⟩ := hdm.1 (by omega)
+      obtain ⟨v, hv, hpure⟩ := Option.bind_eq_some_iff.mp hs''
+      simp only [Option.pure_def, Option.some.injEq] at hpure
+      subst hpure
+      obtain ⟨hvl, hb⟩ := foldlM_writeByte?_bound _ _ _ _ _ _ _ _ hv
+      have hlast := hb (w - 1) (List.mem_range'_1.mpr ⟨by omega, by omega⟩)
+      refine ⟨⟨by rw [hvl, hl], by rw [h8, hr, hab], ?_⟩, by dsimp only; omega⟩
+      show s.2.2.2 + w = 8 * (t + 1) / c * w
+      rw [h8, hq, Nat.succ_mul, hj]
+    · obtain ⟨hq, hr⟩ := hdm.2 (by omega)
+      simp only [Option.pure_def, Option.some.injEq] at hs''
+      subst hs''
+      exact ⟨⟨hl, by rw [h8, hr, hab], by rw [h8, hq, hj]⟩, hjle⟩
+
+/-- Past its checks, and unless expansion is a copy, `expand_array_into` is the outer loop, a
+    monadic fold of `outerStep?` over the input, from an all-zero output. -/
+theorem expandArrayInto?_eq_foldlM (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥ 8)
     (h32 : 32 ≥ 7 + c) (hl : vout.length = expandedLen vin.length c pad)
     (hne : ¬ expandedLen vin.length c pad = vin.length) :
     expandArrayInto? vin c pad vout =
-      some (vin.foldl (outerStep c pad) (vout.map fun _ => 0, 0, 0, 0)).1 := by
-  have hlen : 8 * vin.length / c * (divCeil c 8 + pad) ≤ (vout.map fun _ => 0).length := by
-    rw [List.length_map, hl, expandedLen, Nat.le_div_iff_mul_le (by omega)]
-    calc 8 * vin.length / c * (divCeil c 8 + pad) * c
-        = 8 * vin.length / c * c * (divCeil c 8 + pad) := by ring
-      _ ≤ 8 * vin.length * (divCeil c 8 + pad) :=
-        Nat.mul_le_mul_right _ (Nat.div_mul_le_self _ _)
-      _ = 8 * (divCeil c 8 + pad) * vin.length := by ring
+      (vin.foldlM (outerStep? c pad) (vout.map fun _ => 0, 0, 0, 0)).map Prod.fst := by
   simp only [expandArrayInto?, h8, h32, hl, hne, guard_true, ↓reduceIte, Option.pure_def,
     Option.bind_eq_bind, Option.bind_some, Std.Legacy.Range.forIn_eq_forIn_range']
   simp only [Std.Legacy.Range.size]
@@ -168,7 +221,39 @@ theorem expandArrayInto?_eq_fold (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥
       simp only [Nat.add_sub_cancel, Nat.div_one]
       exact key _ _
     · rfl)]
-  rw [foldlM_outerStep? vin c pad _ h8 hlen _ ⟨rfl, by simp, by simp⟩]
+  cases vin.foldlM (outerStep? c pad) (vout.map fun _ => 0, 0, 0, 0) <;> rfl
+
+/-- Past its checks, and unless expansion is a copy, `expand_array_into` writes nothing out of
+    bounds when the product `8·w·L` does not wrap, and folds `outerStep` over the input, from an
+    all-zero output. -/
+theorem expandArrayInto?_eq_fold (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥ 8)
+    (h32 : 32 ≥ 7 + c) (hl : vout.length = expandedLen vin.length c pad)
+    (hne : ¬ expandedLen vin.length c pad = vin.length)
+    (hfit : 8 * (divCeil c 8 + pad) * vin.length < 2 ^ 64) :
+    expandArrayInto? vin c pad vout =
+      some (vin.foldl (outerStep c pad) (vout.map fun _ => 0, 0, 0, 0)).1 := by
+  have hlen : 8 * vin.length / c * (divCeil c 8 + pad) ≤ (vout.map fun _ => 0).length := by
+    rw [List.length_map, hl, expandedLen, Nat.mod_eq_of_lt hfit,
+      Nat.le_div_iff_mul_le (by omega)]
+    calc 8 * vin.length / c * (divCeil c 8 + pad) * c
+        = 8 * vin.length / c * c * (divCeil c 8 + pad) := by ring
+      _ ≤ 8 * vin.length * (divCeil c 8 + pad) :=
+        Nat.mul_le_mul_right _ (Nat.div_mul_le_self _ _)
+      _ = 8 * (divCeil c 8 + pad) * vin.length := by ring
+  rw [expandArrayInto?_eq_foldlM vin vout c pad h8 h32 hl hne,
+    foldlM_outerStep? vin c pad _ h8 hlen _ ⟨rfl, by simp, by simp⟩]
+  rfl
+
+/-- Past its checks, and unless expansion is a copy, `expand_array_into` panics into an output
+    shorter than `⌊8L/c⌋·w` bytes. -/
+theorem expandArrayInto?_short (vin vout : List ℕ) (c pad : ℕ) (h8 : c ≥ 8)
+    (h32 : 32 ≥ 7 + c) (hl : vout.length = expandedLen vin.length c pad)
+    (hne : ¬ expandedLen vin.length c pad = vin.length)
+    (hshort : vout.length < 8 * vin.length / c * (divCeil c 8 + pad)) :
+    expandArrayInto? vin c pad vout = none := by
+  rw [expandArrayInto?_eq_foldlM vin vout c pad h8 h32 hl hne,
+    foldlM_outerStep?_short vin c pad _ h8 (by rwa [List.length_map]) _
+      ⟨rfl, by simp, by simp⟩]
   rfl
 
 /-! ## The inner loop -/
@@ -357,9 +442,11 @@ theorem OuterInv.next (vin : List ℕ) (hvin : ∀ b ∈ vin, b < 256) (c pad le
     · intro d hd; exact hdone d (by rw [h8, hq] at hd; exact hd)
 
 /-- **`expand_array`**: digit `s` of the input (`c` bits, from the most significant) becomes
-    bytes `s·w .. s·w + w` of the output, big-endian, with `w = ⌈c/8⌉ + pad`. -/
+    bytes `s·w .. s·w + w` of the output, big-endian, with `w = ⌈c/8⌉ + pad`, when the product
+    `8·w·L` does not wrap. -/
 theorem expandArray?_spec (vin : List ℕ) (hvin : ∀ b ∈ vin, b < 256) (c pad : ℕ)
-    (hc8 : 8 ≤ c) (hc32 : c + 7 ≤ 32) (hdiv : c ∣ 8 * vin.length) :
+    (hc8 : 8 ≤ c) (hc32 : c + 7 ≤ 32) (hdiv : c ∣ 8 * vin.length)
+    (hfit : 8 * (divCeil c 8 + pad) * vin.length < 2 ^ 64) :
     ∃ out, expandArray? vin c pad = some out ∧
       out.length = 8 * vin.length / c * (divCeil c 8 + pad) ∧
       ∀ s < 8 * vin.length / c, ∀ x < divCeil c 8 + pad,
@@ -369,8 +456,8 @@ theorem expandArray?_spec (vin : List ℕ) (hvin : ∀ b ∈ vin, b < 256) (c pa
   have hw8 : divCeil c 8 = (c + 7) / 8 := by rw [divCeil_eq _ _ (by norm_num)]; rfl
   -- The output has `(8L / c)·w` bytes.
   have hexp : expandedLen vin.length c pad = 8 * vin.length / c * w := by
-    rw [expandedLen, ← hw, Nat.mul_comm 8 w, Nat.mul_assoc, Nat.mul_div_assoc _ hdiv,
-      Nat.mul_comm]
+    rw [expandedLen, Nat.mod_eq_of_lt hfit, Nat.mul_comm 8 w, Nat.mul_assoc,
+      Nat.mul_div_assoc _ hdiv, Nat.mul_comm]
   by_cases hcopy : expandedLen vin.length c pad = vin.length
   · -- Expansion is the identity: the output is a copy of the input.
     refine ⟨vin, ?_, by rw [← hexp, hcopy], fun s hs x hx => ?_⟩
@@ -383,7 +470,7 @@ theorem expandArray?_spec (vin : List ℕ) (hvin : ∀ b ∈ vin, b < 256) (c pa
     have hcw : c = 8 * w := by
       refine eq_of_expanded_len _ _ _ (by omega) hdiv hL0 ?_
       have := hcopy
-      rwa [expandedLen, ← hw] at this
+      rwa [expandedLen, Nat.mod_eq_of_lt hfit] at this
     have hsw : (s + 1) * w ≤ vin.length := by
       have hw0 : 0 < w := by omega
       rw [hcw, Nat.mul_comm 8 w, Nat.mul_comm 8 vin.length,
@@ -392,7 +479,7 @@ theorem expandArray?_spec (vin : List ℕ) (hvin : ∀ b ∈ vin, b < 256) (c pa
     rw [digit_whole_bytes vin hvin w s x hsw hx, hcw]
   · -- The general case: the outer loop, from an all-zero output.
     have hfold := expandArrayInto?_eq_fold vin (List.replicate (expandedLen vin.length c pad) 0)
-      c pad (by omega) (by omega) (by simp) hcopy
+      c pad (by omega) (by omega) (by simp) hcopy hfit
     have hinv : ∀ t ≤ vin.length, OuterInv vin c w (8 * vin.length / c * w) t
         ((vin.take t).foldl (outerStep c pad)
           ((List.replicate (expandedLen vin.length c pad) 0).map fun _ => 0, 0, 0, 0)) := by

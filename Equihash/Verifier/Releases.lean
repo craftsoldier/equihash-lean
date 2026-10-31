@@ -30,21 +30,63 @@ def isValidSolution? (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ)
   let some hasher ← LeafHasher.new? p input nonce kernel | throw .UnsupportedInputLength
   validateTree? p indices fun blocks digests => hasher.hash? blocks digests
 
+/-- `equihash 0.3.0`'s `Node::new` (`src/verify.rs`, lines 22–30): `Node.new?`, but with 0.3.0's
+    `expand_array`. -/
+def Node.new_equihash_0_3_0? (p : Params) (state : Blake2b.State) (i : ℕ) : Option Node := do
+  guard (p.indicesPerHashOutput ≠ 0)
+  let hash := generateHash state (i / p.indicesPerHashOutput)
+  let start := i % p.indicesPerHashOutput * p.n / 8
+  let «end» := start + p.n / 8
+  let bytes ← slice? hash start «end»
+  let hash ← expandArrayAlloc? bytes p.collisionBitLength 0
+  return { hash, indices := [i] }
+
+/-- `equihash 0.3.0`'s `tree_validator` (lines 208–219): `treeValidator?`, but with 0.3.0's
+    `Node::new`. -/
+def treeValidator_equihash_0_3_0? (p : Params) (state : Blake2b.State) (indices : List ℕ) :
+    ExceptT Kind Option Node :=
+  if h : indices.length > 1 then do
+    let «end» := indices.length
+    let mid := «end» / 2
+    let a ← treeValidator_equihash_0_3_0? p state (indices.take mid)
+    let b ← treeValidator_equihash_0_3_0? p state (indices.drop mid)
+    validateSubtrees? p a b
+    return ← Node.fromChildren? a b p.collisionByteLength
+  else do
+    let i ← (indices[0]? : Option ℕ)
+    return ← Node.new_equihash_0_3_0? p state i
+termination_by indices.length
+decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
+
+/-- `equihash 0.3.0`'s `is_valid_solution_recursive` (lines 221–239): `isValidSolutionRecursive?`,
+    but with 0.3.0's `tree_validator`. -/
+def isValidSolutionRecursive_equihash_0_3_0? (p : Params) (input nonce : List ℕ)
+    (indices : List ℕ) : ExceptT Kind Option Unit := do
+  let mut state ← initialiseState? p.n p.k p.hashOutput
+  state := state.update input
+  state := state.update nonce
+  let root ← treeValidator_equihash_0_3_0? p state indices
+  -- Hashes were trimmed, so only need to check remaining length.
+  if root.isZero p.collisionByteLength then
+    return ()
+  else
+    throw .NonZeroRootHash
+
 /-- `equihash 0.3.0`'s `is_valid_solution` (`src/verify.rs`, lines 243–255) for `soln`, a
     minimally encoded solution for `input ‖ nonce` of any length, with parameters `n` and `k`.
 
-`is_valid_solution_recursive` and the functions it calls (`src/verify.rs`, lines 16–239) have
-the bodies of `zakura-equihash 4.0.0`'s test-only copies (`Verifier/Recursive.lean`), but for
-two differences: `initialise_state` spells out `"ZcashPoW"` where Zakura names it, and
-`Node::new` calls 0.3.0's `expand_array`, which computes what Zakura's does
-(`expandArrayAlloc?_eq`). Around them, 0.3.0's `Kind` has no `UnsupportedInputLength`, which
-none of them returns, and only visibility, `cfg(test)` and `Node`'s `derive(Clone)` differ. -/
+`Node::new`, `tree_validator` and `is_valid_solution_recursive` are transcribed above, since
+`Node::new` calls 0.3.0's `expand_array`. The other functions they call (`src/verify.rs`, lines
+16–206) have the bodies of `zakura-equihash 4.0.0`'s test-only copies (`Verifier/Recursive.lean`),
+but for `initialise_state`, which spells out `"ZcashPoW"` where Zakura names it. Around them,
+0.3.0's `Kind` has no `UnsupportedInputLength`, which none of them returns, and only visibility
+and `cfg(test)` differ. -/
 def isValidSolution_equihash_0_3_0? (n k : ℕ) (input nonce soln : List ℕ) :
     ExceptT Kind Option Unit := do
   let some p := Params.newUnbounded? n k | throw .InvalidParams
   let some indices ← indicesFromMinimalWrapping? p soln | throw .InvalidParams
   -- Recursive validation is faster.
-  isValidSolutionRecursive? p input nonce indices
+  isValidSolutionRecursive_equihash_0_3_0? p input nonce indices
 
 /-- The closure `equihash 0.3.1`'s `is_valid_solution` hashes with when `input ‖ nonce` is not
     140 bytes (`src/verify.rs`, lines 276–281): `blake2b_simd`'s digest of each block, from
