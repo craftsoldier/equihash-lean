@@ -1,0 +1,60 @@
+[package]
+name = "equihash"
+description = "The Equihash Proof-of-Work function"
+version = "0.3.1"
+authors = ["Jack Grigg <jack@z.cash>"]
+homepage = "https://github.com/zcash/librustzcash"
+repository.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = ["std"]
+std = ["document-features"]
+
+## Tromp solver support, implemented in Rust.
+solver = ["dep:libc", "std"]
+
+## Solver optimisations using `unsafe` Rust.
+unsafe-solver = ["solver"]
+
+## Verifier optimisations using `unsafe` Rust.
+unsafe-verifier = []
+
+[dependencies]
+corez.workspace = true
+blake2b_simd.workspace = true
+
+# Dependencies used internally:
+# (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
+# - Documentation
+document-features = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Huge pages are an optional hint for the solver's anonymous mappings.
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+criterion.workspace = true
+hex = "0.4"
+rand = { workspace = true, features = ["std", "std_rng"] }
+
+[lib]
+bench = false
+
+[[bench]]
+name = "solver"
+harness = false
+required-features = ["solver"]
+
+[[bench]]
+name = "verify"
+harness = false
+
+[lints]
+workspace = true
