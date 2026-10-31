@@ -32,7 +32,7 @@ jobs:
           PINS: |
             crates zakura-equihash 4.0.0 b2f460f432240b51eba911f4389ac40a549399cd14589d6773cb39239583f20c rust/zakura-equihash-4.0.0
             crates equihash 0.3.0 306286e8dcc39ab3dfceb74c792ce8baffdab90591321d3ffaae64829734c37f rust/equihash-0.3.0
-            git https://github.com/zcash/librustzcash 0ef23a95d0ddbf01b4345833ecb7a03e91019822 components/equihash rust/equihash-0.3.1
+            crates equihash 0.3.1 49eac9289a160ac92d99537b3434a1a3696df0177fe2c66818bdb9a33b6d5770 rust/equihash-0.3.1
         run: |
           set -euo pipefail
           pinned=()

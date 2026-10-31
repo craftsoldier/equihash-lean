@@ -11,9 +11,10 @@ public import Equihash.Verifier.Params
 namespace Equihash.Verifier
 
 /-- `expanded_len` (`src/minimal.rs`, lines 58–60):
-    `8 * (bit_len.div_ceil(8) + byte_pad) * vin_len / bit_len`. -/
+    `8 * (bit_len.div_ceil(8) + byte_pad) * vin_len / bit_len`, whose `usize` product wraps
+    modulo `2^64` in a release build. -/
 def expandedLen (vinLen bitLen bytePad : ℕ) : ℕ :=
-  8 * (divCeil bitLen 8 + bytePad) * vinLen / bitLen
+  8 * (divCeil bitLen 8 + bytePad) * vinLen % 2 ^ 64 / bitLen
 
 /-- `expand_array_into` (lines 64–107): writes each `bit_len`-bit digit of `vin`, big-endian,
     into `out_width` bytes of `vout`, the first `byte_pad` of them zero. `none` where the Rust
@@ -68,7 +69,8 @@ def expandArrayAlloc? (vin : List ℕ) (bitLen bytePad : ℕ) : Option (List ℕ
   guard (bitLen ≥ 8)
   guard (32 ≥ 7 + bitLen)
   let outWidth := divCeil bitLen 8 + bytePad
-  let outLen := 8 * outWidth * vin.length / bitLen
+  -- The `usize` product wraps modulo `2^64`, as in `expandedLen`.
+  let outLen := 8 * outWidth * vin.length % 2 ^ 64 / bitLen
   -- Shortcut for parameters where expansion is a no-op.
   if outLen = vin.length then
     return vin

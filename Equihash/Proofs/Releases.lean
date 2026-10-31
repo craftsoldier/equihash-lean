@@ -165,14 +165,6 @@ theorem Params.zakura_of_new? {n k : ℕ} {rp : Params} (h : Params.new? n k = s
     Dvd.dvd.mul_right (Nat.dvd_of_mod_eq_zero h8) _⟩, Nat.dvd_of_mod_eq_zero h8, hkn, hlo, hhi⟩,
     rfl, rfl, rfl, rfl⟩
 
-/-- `solution_bytes`: `2^k·(n/(k+1) + 1)/8`, unless the product overflows a `usize`. -/
-theorem Params.solutionBytes?_eq {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
-    rp.solutionBytes? = if 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 then
-      some (2 ^ p.k * (p.digitBits + 1) / 8) else none := by
-  simp only [Params.solutionBytes?, Params.solutionIndices?_eq h, Option.bind_eq_bind,
-    Option.bind_some, Params.collisionBitLength_eq h, checkedMul?, USIZE_BITS]
-  split_ifs <;> rfl
-
 /-! ## The hash -/
 
 /-- The personalization `initialise_state` builds is §5.4.1.11's `powtag`. -/
@@ -205,14 +197,14 @@ theorem ZakuraParams.ext' {p q : ZakuraParams} (hn : p.n = q.n) (hk : p.k = q.k)
 
 /-- **`is_valid_solution` is correct.** For a 140-byte `input ‖ nonce`, under any kernel,
     Zakura's Equihash verifier returns `Ok(())` for the solution bytes `soln` with parameters
-    `n` and `k` exactly when they are parameters it supports, whose solutions are under `2^64`
+    `n` and `k` exactly when they are parameters it supports, whose solutions are under `2^62`
     bits long, and `soln` encodes a solution valid by §7.7.1, for `powheader = input ‖ nonce`
     under BLAKE2b, with no repeated index. -/
 theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ)
     (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
     (hlen : input.length + nonce.length = 140) :
     (isValidSolution? kernel n k input nonce soln).run = some (.ok ()) ↔
-      ∃ p : ZakuraParams, p.n = n ∧ p.k = k ∧ 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 ∧
+      ∃ p : ZakuraParams, p.n = n ∧ p.k = k ∧ 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
         ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
           ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup := by
   unfold isValidSolution?
@@ -225,24 +217,29 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     simp at hnew
   obtain ⟨p, hn, hk, h⟩ := Params.zakura_of_new? hnew
   -- Every `ZakuraParams` with this `n` and `k` is `p`.
-  have hR : (∃ q : ZakuraParams, q.n = n ∧ q.k = k ∧ 2 ^ q.k * (q.digitBits + 1) < 2 ^ 64 ∧
+  have hR : (∃ q : ZakuraParams, q.n = n ∧ q.k = k ∧ 2 ^ q.k * (q.digitBits + 1) < 2 ^ 62 ∧
         ∃ i, EncodesSolution q.toParams (bytesOf soln) i ∧
           ValidSolution Blake2b.hashFn q.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup) ↔
-      2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 ∧ ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
+      2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧ ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
         ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup :=
     ⟨fun ⟨q, hqn, hqk, hrest⟩ => ZakuraParams.ext' (hqn.trans hn.symm) (hqk.trans hk.symm) ▸ hrest,
       fun hrest => ⟨p, hn, hk, hrest⟩⟩
   rw [hR]
   dsimp only
-  rw [indicesFromMinimal?_spec h soln hsoln, Params.solutionBytes?_eq h]
+  by_cases hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62
+  swap
+  · -- Solutions of `2^62` bits or more: the decoder rejects or panics.
+    simp only [hfit, false_and, iff_false]
+    rcases hI : indicesFromMinimal? rp soln with _ | _ | L
+    · simp [ExceptT.run_bind, liftM, monadLift, MonadLift.monadLift, ExceptT.lift]
+    · simp
+    · exact absurd hI (indicesFromMinimal?_ne_of_big h soln hfit L)
+  have hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 := by omega
+  rw [indicesFromMinimal?_spec h soln hsoln hfit, Params.solutionBytes?_eq h]
   simp only [monadLift_some, pure_bind]
   set B := bitsOfBytes (bytesOf soln) with hB
   have hBl : B.length = 8 * soln.length := by simp [hB, length_bitsOfBytes]
-  by_cases hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64
-  swap
-  · simp only [hov, ↓reduceIte, Option.bind_none, run_throw, Option.some.injEq, reduceCtorEq,
-      false_and, iff_self]
-  simp only [hov, ↓reduceIte, Option.bind_some, true_and]
+  simp only [hov, hfit, ↓reduceIte, Option.bind_some, true_and]
   obtain ⟨r, hr⟩ : 8 ∣ 2 ^ p.k * (p.digitBits + 1) := by
     have := p.k_ge
     exact Dvd.dvd.mul_right ⟨2 ^ (p.k - 3), by
@@ -350,6 +347,31 @@ theorem expandArrayAlloc?_eq (vin : List ℕ) (bitLen bytePad : ℕ) :
   simp only [List.length_replicate, expandedLen, guard_true, List.map_replicate]
   rfl
 
+/-- 0.3.0's `Node::new` computes what Zakura's does. -/
+theorem Node.new_equihash_0_3_0?_eq (p : Params) (state : Blake2b.State) (i : ℕ) :
+    Node.new_equihash_0_3_0? p state i = Node.new? p state i := by
+  simp only [Node.new_equihash_0_3_0?, Node.new?, expandArrayAlloc?_eq]
+
+/-- 0.3.0's `tree_validator` computes what Zakura's does. -/
+theorem treeValidator_equihash_0_3_0?_eq (p : Params) (state : Blake2b.State)
+    (indices : List ℕ) :
+    treeValidator_equihash_0_3_0? p state indices = treeValidator? p state indices := by
+  rw [treeValidator_equihash_0_3_0?, treeValidator?]
+  split
+  · dsimp only
+    rw [treeValidator_equihash_0_3_0?_eq p state (indices.take (indices.length / 2)),
+      treeValidator_equihash_0_3_0?_eq p state (indices.drop (indices.length / 2))]
+  · simp only [Node.new_equihash_0_3_0?_eq]
+termination_by indices.length
+decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
+
+/-- 0.3.0's `is_valid_solution_recursive` computes what Zakura's does. -/
+theorem isValidSolutionRecursive_equihash_0_3_0?_eq (p : Params) (input nonce indices : List ℕ) :
+    isValidSolutionRecursive_equihash_0_3_0? p input nonce indices =
+      isValidSolutionRecursive? p input nonce indices := by
+  simp only [isValidSolutionRecursive_equihash_0_3_0?, isValidSolutionRecursive?,
+    treeValidator_equihash_0_3_0?_eq]
+
 /-- 0.3.0's `indices_from_minimal`, as its loop body. -/
 theorem indicesFromMinimalWrapping?_eq (p : Params) (minimal : List ℕ) :
     indicesFromMinimalWrapping? p minimal =
@@ -388,22 +410,24 @@ theorem Params.newUnbounded?_zakura (p : ZakuraParams) :
   simp only [Params.newUnbounded?, hc, and_self, ↓reduceIte]
 
 /-- **`equihash 0.3.0`'s `is_valid_solution` is correct**, for parameters Zakura accepts whose
-    solutions are under `2^64` bits long, and an `input ‖ nonce` of any length: it returns
+    solutions are under `2^62` bits long, and an `input ‖ nonce` of any length: it returns
     `Ok(())` exactly for the solution bytes that encode a solution valid by §7.7.1, for
     `powheader = input ‖ nonce` under BLAKE2b, with no repeated index. -/
 theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce soln : List ℕ)
     (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
-    (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64) :
+    (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) :
     (isValidSolution_equihash_0_3_0? p.n p.k input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
         ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup := by
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
+  have hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 := by omega
   unfold isValidSolution_equihash_0_3_0?
   rw [Params.newUnbounded?_zakura]
   dsimp only
-  rw [indicesFromMinimalWrapping?_eq_of_fit h hfit, indicesFromMinimal?_spec h soln hsoln,
+  simp only [isValidSolutionRecursive_equihash_0_3_0?_eq]
+  rw [indicesFromMinimalWrapping?_eq_of_fit h hov, indicesFromMinimal?_spec h soln hsoln hfit,
     Params.solutionBytes?_eq h]
-  simp only [hfit, ↓reduceIte, Option.bind_some, monadLift_some, pure_bind]
+  simp only [hov, ↓reduceIte, Option.bind_some, monadLift_some, pure_bind]
   have hBl : (bitsOfBytes (bytesOf soln)).length = 8 * soln.length := by
     simp [length_bitsOfBytes]
   obtain ⟨r, hr⟩ : 8 ∣ 2 ^ p.k * (p.digitBits + 1) := by
@@ -473,12 +497,12 @@ theorem isValidSolution_equihash_0_3_0?_448_63 (input nonce : List ℕ) :
   dsimp only
   rw [hd]
   simp only [monadLift_some, pure_bind]
-  unfold isValidSolutionRecursive?
+  unfold isValidSolutionRecursive_equihash_0_3_0?
   obtain ⟨st, hst⟩ : ∃ st, initialiseState? (⟨448, 63⟩ : Params).n (⟨448, 63⟩ : Params).k
       (⟨448, 63⟩ : Params).hashOutput = some st := ⟨_, rfl⟩
   rw [hst]
   simp only [monadLift_some, pure_bind]
-  rw [treeValidator?]
+  rw [treeValidator_equihash_0_3_0?]
   rfl
 
 /-- **Likewise `(520, 64)`.** `1 << 64` shifts by `64 mod 64 = 0`, so the length check expects
@@ -542,29 +566,34 @@ theorem blake2bSimdHash?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S 
 
 /-- **`equihash 0.3.1`'s `is_valid_solution` is correct**, for parameters Zakura accepts and an
     `input ‖ nonce` of any length: it returns `Ok(())` exactly when the solutions are under
-    `2^64` bits long and the solution bytes encode a solution valid by §7.7.1, for
+    `2^62` bits long and the solution bytes encode a solution valid by §7.7.1, for
     `powheader = input ‖ nonce` under BLAKE2b, with no repeated index. On a 140-byte
     `input ‖ nonce` the leaf hasher computes BLAKE2b, under any kernel; on any other,
     `blake2b_simd` is assumed to. -/
 theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraParams)
     (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
     (isValidSolution_equihash_0_3_1? kernel p.n p.k input nonce soln).run = some (.ok ()) ↔
-      2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 ∧
+      2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
         ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i ∧ i.Nodup := by
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
   unfold isValidSolution_equihash_0_3_1?
   rw [Params.newUnbounded?_zakura]
   dsimp only
-  rw [indicesFromMinimal?_spec h soln hsoln, Params.solutionBytes?_eq h]
+  by_cases hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62
+  swap
+  · -- Solutions of `2^62` bits or more: the decoder rejects or panics.
+    simp only [hfit, false_and, iff_false]
+    rcases hI : indicesFromMinimal? ⟨p.n, p.k⟩ soln with _ | _ | L
+    · simp [ExceptT.run_bind, liftM, monadLift, MonadLift.monadLift, ExceptT.lift]
+    · simp
+    · exact absurd hI (indicesFromMinimal?_ne_of_big h soln hfit L)
+  have hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 := by omega
+  rw [indicesFromMinimal?_spec h soln hsoln hfit, Params.solutionBytes?_eq h]
   simp only [monadLift_some, pure_bind]
   set B := bitsOfBytes (bytesOf soln) with hB
   have hBl : B.length = 8 * soln.length := by simp [hB, length_bitsOfBytes]
-  by_cases hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64
-  swap
-  · simp only [hov, ↓reduceIte, Option.bind_none, run_throw, Option.some.injEq, reduceCtorEq,
-      false_and, iff_self]
-  simp only [hov, ↓reduceIte, Option.bind_some, true_and]
+  simp only [hov, hfit, ↓reduceIte, Option.bind_some, true_and]
   obtain ⟨r, hr⟩ : 8 ∣ 2 ^ p.k * (p.digitBits + 1) := by
     have := p.k_ge
     exact Dvd.dvd.mul_right ⟨2 ^ (p.k - 3), by

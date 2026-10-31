@@ -1,7 +1,8 @@
 /-
 `src/verify.rs`: the recursive Equihash verifier (test-only in `zakura-equihash`, the production
 one in `equihash 0.3.0`). Line numbers are `zakura-equihash 4.0.0`'s; `0.3.0:` marks
-`equihash 0.3.0`'s.
+`equihash 0.3.0`'s. 0.3.0's `Node::new`, `tree_validator` and `is_valid_solution_recursive` are
+in `Verifier/Releases.lean`, since its `Node::new` calls its own `expand_array`.
 
 A Rust panic is `none`; a function returning a Rust `Result` is into `ExceptT Kind Option`
 (`Verifier/Error.lean`).
@@ -45,7 +46,7 @@ def generateHash (baseState : Blake2b.State) (i : ℕ) : List ℕ :=
 
 namespace Node
 
-/-- `Node::new` (lines 34–42; 0.3.0: 22–30): the leaf for index `i`.
+/-- `Node::new` (lines 34–42): the leaf for index `i`.
 `i / indices_per_hash_output()` panics when the divisor is 0, that is, when `n > 512`. -/
 def new? (p : Params) (state : Blake2b.State) (i : ℕ) : Option Node := do
   guard (p.indicesPerHashOutput ≠ 0)
@@ -104,8 +105,7 @@ def validateSubtrees? (p : Params) (a b : Node) : ExceptT Kind Option Unit := do
   else
     return ()
 
-/-- `tree_validator` (lines 230–241; 0.3.0: 208–219): checks the two halves of `indices`, then
-    their merge. -/
+/-- `tree_validator` (lines 230–241): checks the two halves of `indices`, then their merge. -/
 def treeValidator? (p : Params) (state : Blake2b.State) (indices : List ℕ) :
     ExceptT Kind Option Node :=
   if h : indices.length > 1 then do
@@ -121,7 +121,7 @@ def treeValidator? (p : Params) (state : Blake2b.State) (indices : List ℕ) :
 termination_by indices.length
 decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
 
-/-- `is_valid_solution_recursive` (lines 244–262; 0.3.0: 221–239). -/
+/-- `is_valid_solution_recursive` (lines 244–262). -/
 def isValidSolutionRecursive? (p : Params) (input nonce : List ℕ) (indices : List ℕ) :
     ExceptT Kind Option Unit := do
   let mut state ← initialiseState? p.n p.k p.hashOutput
