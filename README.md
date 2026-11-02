@@ -14,7 +14,9 @@ specification (§7.7.1) calls valid, with distinct indices. Each theorem states 
   whose solutions are under `2^62` bits long, which include Zcash's. It hashes with the
   `blake2b_simd` crate, which it assumes computes BLAKE2b. Outside those parameters its length
   check wraps where it should overflow, which theorems state for `(448, 63)` and `(520, 64)`: it
-  accepts a solution of the wrong length, and then panics.
+  accepts a solution of the wrong length, and then panics. For `(480, 59)` and `(488, 60)` its
+  length check is exact, and its decoding is Zakura's, which panics on them (theorems state
+  both).
 - `equihash` 0.3.1: for an input of any length, and the parameters `zakura-equihash` accepts
   whose solutions are under `2^62` bits long, which include Zcash's. Its length check and
   decoding are Zakura's: parameters whose solutions reach `2^64` bits are an error, which

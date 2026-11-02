@@ -77,7 +77,7 @@ def isValidSolutionRecursive_equihash_0_3_0? (p : Params) (input nonce : List �
 
 `Node::new`, `tree_validator` and `is_valid_solution_recursive` are transcribed above, since
 `Node::new` calls 0.3.0's `expand_array`. The other functions they call (`src/verify.rs`, lines
-16–206) have the bodies of `zakura-equihash 4.0.0`'s test-only copies (`Verifier/Recursive.lean`),
+16–168) have the bodies of `zakura-equihash 4.0.0`'s test-only copies (`Verifier/Recursive.lean`),
 but for `initialise_state`, which spells out `"ZcashPoW"` where Zakura names it. Around them,
 0.3.0's `Kind` has no `UnsupportedInputLength`, which none of them returns, and only visibility
 and `cfg(test)` differ. -/
