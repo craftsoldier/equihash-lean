@@ -23,10 +23,8 @@ jobs:
         with:
           persist-credentials: false
       # Each folder in `rust/` must be its pinned source, unmodified: a crates.io crate
-      # (its `.crate` file's SHA-256, also checked against the crates.io index) or a
-      # directory of a git repository at a commit. One pin per line:
+      # (its `.crate` file's SHA-256, also checked against the crates.io index). One pin per line:
       #   crates <name> <version> <sha256> <folder>
-      #   git <repository> <commit> <directory> <folder>
       - name: Check the pinned sources
         env:
           PINS: |
@@ -60,20 +58,6 @@ jobs:
                 echo "$sha  $tmp/crate" | sha256sum -c -
                 tar -xzf "$tmp/crate" -C "$tmp"
                 source="$tmp/$name-$version"
-                ;;
-              git)
-                repository=$a commit=$b directory=$c
-                # The clone lives outside `$tmp`, so it never shows up in the comparison.
-                repo=$(mktemp -d)
-                git init -q "$repo"
-                git -C "$repo" fetch -q --depth 1 "$repository" "$commit"
-                [ "$(git -C "$repo" rev-parse FETCH_HEAD)" = "$commit" ] \
-                  || { echo "::error::$repository: fetched a commit other than $commit"; exit 1; }
-                # `git archive` honours the pinned repository's `export-ignore` and
-                # `export-subst` attributes; a pinned directory that uses them would need
-                # another extraction.
-                git -C "$repo" archive FETCH_HEAD "$directory" | tar -x -C "$tmp"
-                source="$tmp/$directory"
                 ;;
               *) echo "::error::unknown pin kind $kind"; exit 1 ;;
             esac

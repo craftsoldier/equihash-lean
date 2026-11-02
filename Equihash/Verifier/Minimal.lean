@@ -21,7 +21,8 @@ def expandedLen (vinLen bitLen bytePad : ℕ) : ℕ :=
     panics.
 
 `vout[j + x] = v` writes in place, panicking out of bounds, as `set?` does; no write is out of
-bounds (`expandArrayInto?_eq_fold`). The right shifts are by at most 31 bits at every call site,
+bounds while `expanded_len` does not wrap (`expandArrayInto?_eq_fold`), and one is when it does
+(`expandArrayInto?_short`). The right shifts are by at most 31 bits at every call site,
 where `out_width` is at most 4 and `acc_bits` is below 8 after the subtraction, so a `u32` shift
 and a natural-number shift agree. -/
 def expandArrayInto? (vin : List ℕ) (bitLen bytePad : ℕ) (vout : List ℕ) : Option (List ℕ) := do
@@ -63,8 +64,9 @@ def expandArray? (vin : List ℕ) (bitLen bytePad : ℕ) : Option (List ℕ) :=
     `expand_array_into`'s check of the output's length and its zeroing, which that vector meets.
 
 `vout[j + x] = v` writes in place, panicking out of bounds, as `set?` does; this function is
-`expandArray?` (`expandArrayAlloc?_eq`), which writes nothing out of bounds, and whose right
-shifts agree with `u32`'s at both of its call sites, `Node::new` and `indices_from_minimal`. -/
+`expandArray?` (`expandArrayAlloc?_eq`), which writes out of bounds only when `out_len` wraps, and
+whose right shifts agree with `u32`'s at both of its call sites, `Node::new` and
+`indices_from_minimal`. -/
 def expandArrayAlloc? (vin : List ℕ) (bitLen bytePad : ℕ) : Option (List ℕ) := do
   guard (bitLen ≥ 8)
   guard (32 ≥ 7 + bitLen)
