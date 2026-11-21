@@ -4,12 +4,13 @@ Zcash's proof of work is Equihash. This repository is a Lean 4 proof, release by
 the Equihash verifiers Zcash software runs accept exactly the solutions the Zcash protocol
 specification (§7.7.1) calls valid, with distinct indices. Each theorem states its hypotheses:
 
-- `zakura-equihash` 4.0.0: for a 140-byte header and nonce, under each of its leaf-hashing
-  kernels. The portable, AVX2 and NEON kernels are transcribed, the last two on models of the
-  CPU instructions they use, written from Intel's and Arm's documentation; the Lean assumes
-  those models, and that the kernel the CPU detection picks is one the CPU supports. Of the
-  parameters it accepts, `(480, 59)` and `(488, 60)` have solutions of `2^62` bits or more:
-  decoding one wraps a `usize` and panics, which a theorem states.
+- `zakura-equihash` 5.4.0, and every release from 4.0.0 to 5.4.0, whose source is the same: for
+  a 140-byte header and nonce, under each of its leaf-hashing kernels. The portable, AVX2 and
+  NEON kernels are transcribed, the last two on models of the CPU instructions they use, written
+  from Intel's and Arm's documentation; the Lean assumes those models, and that the kernel the
+  CPU detection picks is one the CPU supports. Of the parameters it accepts, `(480, 59)` and
+  `(488, 60)` have solutions of `2^62` bits or more: decoding one wraps a `usize` and panics,
+  which a theorem states.
 - `equihash` 0.3.0: for an input of any length, and the parameters `zakura-equihash` accepts
   whose solutions are under `2^62` bits long, which include Zcash's. It hashes with the
   `blake2b_simd` crate, which it assumes computes BLAKE2b. Outside those parameters its length
@@ -27,7 +28,7 @@ specification (§7.7.1) calls valid, with distinct indices. Each theorem states 
 
 | Crate             | Version | Status  | Assumes                                            |
 |-------------------|---------|---------|----------------------------------------------------|
-| `zakura-equihash` | 4.0.0   | Proven  | The instruction models match Intel's and Arm's docs |
+| `zakura-equihash` | 5.4.0   | Proven  | The instruction models match Intel's and Arm's docs |
 | `equihash`        | 0.3.0   | Proven  | `blake2b_simd` computes BLAKE2b                    |
 | `equihash`        | 0.3.1   | Proven  | The models; `blake2b_simd` off 140-byte inputs     |
 
@@ -63,7 +64,7 @@ in `spec/` are under the MIT license in [`spec/COPYING.rst`](spec/COPYING.rst).
 The Lean in `Equihash/Verifier/` transcribes `zakura-equihash`, Copyright (c) The Zakura
 Contributors, originally Copyright (c) 2020-2022 The Zcash developers and 2017-2021 The
 Electric Coin Company, under MIT OR Apache-2.0; see
-[`rust/zakura-equihash-4.0.0/COPYRIGHT`](rust/zakura-equihash-4.0.0/COPYRIGHT). It also
+[`rust/zakura-equihash-5.4.0/COPYRIGHT`](rust/zakura-equihash-5.4.0/COPYRIGHT). It also
 transcribes `equihash` 0.3.0 and 0.3.1, by Jack Grigg, under MIT OR Apache-2.0; their packages
 carry no license file, and the `LICENSE-MIT` of zcash/librustzcash at the `equihash-0.3.0` tag
 and at commit `0ef23a95` reads Copyright (c) 2017-2021 The Electric Coin Company.

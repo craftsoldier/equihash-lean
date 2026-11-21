@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.97"
 name = "zakura-equihash"
-version = "4.0.0"
+version = "5.4.0"
 authors = [
     "Dev Ojha <ValarDragon@users.noreply.github.com>",
     "Sean Bowe <ewillbefull@gmail.com>",

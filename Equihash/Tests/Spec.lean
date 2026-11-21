@@ -1,5 +1,5 @@
 /-
-The specification on two real blocks (`zakura-equihash 4.0.0`, `src/test_vectors/zcash.rs`):
+The specification on two real blocks (`zakura-equihash 5.4.0`, `src/test_vectors/zcash.rs`):
 Zcash mainnet block 415000 (lines 5–44, `n = 200, k = 9`) and the Regtest genesis block
 (lines 50–61, `n = 48, k = 5`). Each solution is valid, and its bytes are its encoding.
 

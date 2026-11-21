@@ -1,6 +1,6 @@
 /-
 `src/verify.rs`: the recursive Equihash verifier (test-only in `zakura-equihash`, the production
-one in `equihash 0.3.0`). Line numbers are `zakura-equihash 4.0.0`'s; `0.3.0:` marks
+one in `equihash 0.3.0`). Line numbers are `zakura-equihash 5.4.0`'s; `0.3.0:` marks
 `equihash 0.3.0`'s. 0.3.0's `Node::new`, `tree_validator` and `is_valid_solution_recursive` are
 in `Verifier/Releases.lean`, since its `Node::new` calls its own `expand_array`.
 

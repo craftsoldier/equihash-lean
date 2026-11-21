@@ -1,5 +1,5 @@
 /-
-The verifiers on the test vectors of `zakura-equihash 4.0.0` (`src/test_vectors/valid.rs` and
+The verifiers on the test vectors of `zakura-equihash 5.4.0` (`src/test_vectors/valid.rs` and
 `src/test_vectors/invalid.rs`): the recursive one and the single-pass one agree, error kind
 included, and accept every valid solution and reject every invalid one with the error the crate
 expects, without panicking. Then the tests of `src/minimal.rs`, identical in both crates: each
