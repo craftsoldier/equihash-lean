@@ -14,25 +14,31 @@ open Equihash Equihash.Spec Equihash.Verifier
 
 Each condition quantifies over a bounded range, so it can be decided by computing. -/
 
-instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List ℕ) :
+instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List (Index p)) :
     Decidable (GeneralizedBirthday H p S i) := by
   unfold GeneralizedBirthday; infer_instance
 
-instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List ℕ) :
+instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List (Index p)) :
     Decidable (CollisionCondition H p S i) := by
   unfold CollisionCondition HasLeadingZeros; infer_instance
 
-instance (p : Spec.Params) (i : List ℕ) : Decidable (OrderingCondition p i) := by
+instance (p : Spec.Params) (i : List (Index p)) : Decidable (OrderingCondition p i) := by
   unfold OrderingCondition; infer_instance
 
-instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List ℕ) :
+instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List (Index p)) :
     Decidable (ValidSolution H p S i) :=
-  decidable_of_iff (i.length = 2 ^ p.k ∧ (∀ j ∈ i, 1 ≤ j ∧ j ≤ p.N) ∧ i.Nodup ∧
+  decidable_of_iff (i.length = 2 ^ p.k ∧ i.Nodup ∧
       GeneralizedBirthday H p S i ∧ CollisionCondition H p S i ∧ OrderingCondition p i)
-    ⟨fun ⟨a, b, c, d, e, f⟩ => ⟨a, b, c, d, e, f⟩, fun ⟨a, b, c, d, e, f⟩ => ⟨a, b, c, d, e, f⟩⟩
+    ⟨fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩, fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩⟩
 
-instance (p : Spec.Params) (s : List Byte) (i : List ℕ) : Decidable (EncodesSolution p s i) := by
+instance (p : Spec.Params) (s : List Byte) (i : List (Index p)) :
+    Decidable (EncodesSolution p s i) := by
   unfold EncodesSolution; infer_instance
+
+/-- A list of numbers as §7.7.1's indices, or `none` if one is outside `{1 .. N}`. -/
+def toIndices? (p : Spec.Params) : List ℕ → Option (List (Index p))
+  | [] => some []
+  | j :: js => if h : 1 ≤ j ∧ j ≤ p.N then (toIndices? p js).map (⟨j, h⟩ :: ·) else none
 
 /-! ## The blocks -/
 
@@ -48,10 +54,12 @@ def indicesOf (w m : ℕ) (solution : List ℕ) : List ℕ :=
   (List.range m).map fun j => ((bits.drop (w * j)).take w).foldl (2 * · + ·) 0 + 1
 
 /-- Zcash's parameters: `n = 200`, `k = 9`. -/
-def zcash : Spec.Params := ⟨200, 9, by decide, by decide, by decide, by decide, by decide⟩
+def zcash : Spec.Params :=
+  ⟨200, 9, by decide, by decide, by decide, by decide, by decide, by decide⟩
 
 /-- Regtest's parameters: `n = 48`, `k = 5`. -/
-def regtest : Spec.Params := ⟨48, 5, by decide, by decide, by decide, by decide, by decide⟩
+def regtest : Spec.Params :=
+  ⟨48, 5, by decide, by decide, by decide, by decide, by decide, by decide⟩
 
 /-- Mainnet block 415000's header up to the nonce (lines 5–9). -/
 def blockHeader : List ℕ := hex (String.join [
@@ -115,15 +123,18 @@ def regtestSolution : List ℕ :=
 /-! ## The checks -/
 
 -- Valid, reading BLAKE2b's output most significant bit first, as `Spec.lean` does.
-#guard decide (ValidSolution Blake2b.hashFn zcash powheader (indicesOf 21 512 solution))
+#guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
+  decide (ValidSolution Blake2b.hashFn zcash powheader i)
 
 -- Its bytes are the encoding of its indices.
-#guard decide (EncodesSolution zcash (bytesOf solution) (indicesOf 21 512 solution))
+#guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
+  decide (EncodesSolution zcash (bytesOf solution) i)
 
 -- The Regtest genesis block: valid, and its bytes are its encoding.
-#guard decide (ValidSolution Blake2b.hashFn regtest (bytesOf (regtestHeader ++ regtestNonce))
-  (indicesOf 9 32 regtestSolution))
-#guard decide (EncodesSolution regtest (bytesOf regtestSolution) (indicesOf 9 32 regtestSolution))
+#guard (toIndices? regtest (indicesOf 9 32 regtestSolution)).any fun i =>
+  decide (ValidSolution Blake2b.hashFn regtest (bytesOf (regtestHeader ++ regtestNonce)) i)
+#guard (toIndices? regtest (indicesOf 9 32 regtestSolution)).any fun i =>
+  decide (EncodesSolution regtest (bytesOf regtestSolution) i)
 
 -- §7.7.1's own example: indices beginning `69, 42, 2^21` encode to bytes beginning
 -- `0, 2, 32, 0, 10, 127, 255`.
@@ -139,4 +150,5 @@ def leastSignificantFirst : HashFn := fun p x =>
   (Blake2b.hashFn p x).map fun b => BitVec.ofNat 8 (reverseBits b.toNat)
 
 -- Not valid, reading it least significant bit first.
-#guard !decide (ValidSolution leastSignificantFirst zcash powheader (indicesOf 21 512 solution))
+#guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
+  !decide (ValidSolution leastSignificantFirst zcash powheader i)

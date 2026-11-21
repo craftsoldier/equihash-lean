@@ -65,16 +65,17 @@ theorem StateFor.update {p : Spec.Params} {S : List Byte} {st : Blake2b.State}
   exact ⟨hl, hp, by simp [Blake2b.State.update, ← hS], hb.append hx⟩
 
 /-- `generate_hash(state, g)`: §5.4.1.11's `T`, the hash of everything absorbed followed by
-    `powcount(g)`. -/
+    `powcount(g mod 2^32)`, the low 32 bits the model's `u32ToLeBytes` keeps. -/
 theorem generateHash_eq {p : Spec.Params} {S : List Byte} {st : Blake2b.State}
     (h : StateFor p S st) (g : ℕ) :
-    generateHash st g = (Blake2b.hashFn (genHashParams p) (S ++ powcount g)).toList.map
+    generateHash st g = (Blake2b.hashFn (genHashParams p)
+      (S ++ powcount ⟨g % 2 ^ 32, Nat.mod_lt _ (Nat.two_pow_pos _)⟩)).toList.map
       BitVec.toNat := by
   obtain ⟨hl, hp, hS, hb⟩ := h
   simp only [generateHash, Blake2b.State.update, Blake2b.State.finalize, Blake2b.hashFn,
     List.Vector.toList_mk]
   rw [map_toNat_bytesOf (bytes_blake2b _ _ _), hl, hp, ← hS, powcount, ← u32ToLeBytes_eq,
-    ← List.map_append, map_toNat_bytesOf (hb.append (bytes_u32ToLeBytes g))]
+    u32ToLeBytes_mod, ← List.map_append, map_toNat_bytesOf (hb.append (bytes_u32ToLeBytes g))]
   rfl
 
 /-- `initialise_state(n, k, n·m/8)`: a BLAKE2b state for §5.4.1.11's `BLAKE2b-(n·m)`,
@@ -99,12 +100,14 @@ theorem initialiseState?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
 
 /-! ## Leaves -/
 
-/-- §5.4.1.11's bit slice `T_{h+1 .. h+n}` lies on byte boundaries when `n = 8q`: `X_{i+1}`
-    is the bits of bytes `(i mod m)·q .. (i mod m)·q + q` of BLAKE2b output `⌊i/m⌋`. -/
-theorem X_succ_eq (H : HashFn) (p : Spec.Params) (S : List Byte) (i q : ℕ) (hq : p.n = 8 * q) :
-    X H p S (i + 1) = bitsOfBytes ((((H (genHashParams p) (S ++ powcount (i / p.m))).toList).drop
+/-- §5.4.1.11's bit slice `T_{h+1 .. h+n}` lies on byte boundaries when `n = 8q`: the hash value
+    of 0-based index `i` is the bits of bytes `(i mod m)·q .. (i mod m)·q + q` of BLAKE2b output
+    `⌊i/m⌋`. -/
+theorem X0_eq_bytes (H : HashFn) (p : Spec.Params) (S : List Byte) (i q : ℕ) (hq : p.n = 8 * q) :
+    X0 H p S i = bitsOfBytes ((((H (genHashParams p)
+      (S ++ powcount ⟨i / p.m % 2 ^ 32, Nat.mod_lt _ (Nat.two_pow_pos _)⟩)).toList).drop
       ((i % p.m) * q)).take q) := by
-  simp only [X, equihashGen, Nat.add_sub_cancel]
+  simp only [X0]
   rw [hq, show i % p.m * (8 * q) = 8 * (i % p.m * q) by ring, bitsOfBytes_drop, bitsOfBytes_take]
 
 /-- `expand_array`'s result, read as digits of the input's bits. -/
@@ -123,13 +126,13 @@ theorem expandedN_of_expand (vin : List ℕ) (hvin : Bytes vin) (c w : ℕ) (out
     le_trans (Nat.mul_le_mul_right c ht) (Nat.div_mul_le_self _ _)
   rw [hall t ht x hx, hV, digit_eq_digitVal _ _ _ _ hB hfit]
 
-/-- **`Node::new`**: a leaf holding index `i` and the expansion of §5.4.1.11's `X_{i+1}`
-    (the hash value of 0-based index `i`) over everything the state absorbed. -/
+/-- **`Node::new`**: a leaf holding index `i` and the expansion of its hash value `X0 i`
+    (§7.7.1's `X_{i+1}` when `i < N`) over everything the state absorbed. -/
 theorem Node.new?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S : List Byte}
     {st : Blake2b.State} (hst : StateFor p.toParams S st) (i : ℕ) :
     ∃ node, Node.new? rp st i = some node ∧ node.indices = [i] ∧
       ExpandedN p.digitBits ((p.digitBits + 7) / 8) node.hash
-        (X Blake2b.hashFn p.toParams S (i + 1)) := by
+        (X0 Blake2b.hashFn p.toParams S i) := by
   have hc8 : 8 ≤ p.digitBits := p.digit_ge
   have hc24 : p.digitBits ≤ 24 := p.digit_le
   -- The parameters: `n = 8q`, and the `q·m`-byte BLAKE2b output.
@@ -174,9 +177,9 @@ theorem Node.new?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S : List 
       guard_true, h.1, ← hT, hq, hiq, show 8 * q / 8 = q by omega, hsl,
       Params.collisionBitLength_eq h, hout, Option.pure_def, Option.bind_eq_bind, Option.bind_some]
   · have hE := expandedN_of_expand bytes hbb _ _ out hlen hall
-    -- Those bytes are §5.4.1.11's `X_{i+1}`.
+    -- Those bytes are the hash value of index `i`.
     rwa [hbytes, hT, hTeq, ← List.map_drop, ← List.map_take, bytesOf, List.map_map,
       show BitVec.ofNat 8 ∘ BitVec.toNat = id from funext fun x => by simp, List.map_id,
-      ← X_succ_eq _ _ _ _ q hq] at hE
+      ← X0_eq_bytes _ _ _ _ q hq] at hE
 
 end Equihash.Verifier

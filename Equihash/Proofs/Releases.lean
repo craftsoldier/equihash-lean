@@ -76,12 +76,22 @@ theorem chunk_flatMap (w : ℕ) (f : ℕ → Bits) (hf : ∀ x, (f x).length = w
     · rw [Nat.succ_mul, Nat.add_comm, ← List.drop_drop, List.drop_left' (hf x)]
       exact ih t (by simpa using ht)
 
-/-- The digits of a decoded solution encode it. -/
+/-- `EncodesSolution` depends only on the indices' values. -/
+theorem encodesSolution_iff (p : Spec.Params) (soln : List Byte) (i : List (Index p)) :
+    EncodesSolution p soln i ↔
+      bitsOfBytes soln = (i.map (·.val)).flatMap fun j => I2BEBSP (p.digitBits + 1) (j - 1) := by
+  simp [EncodesSolution]
+
+/-- Every digit of `digitBits + 1` bits is a 0-based index below `N`. -/
+theorem digits_lt (p : Spec.Params) (B : Bits) (m : ℕ) :
+    ∀ j ∈ (List.range m).map (digitVal (p.digitBits + 1) B), j < p.N := fun j hj => by
+  obtain ⟨t, -, rfl⟩ := List.mem_map.mp hj; exact digitVal_lt _ _ _
+
+/-- The digits of a decoded solution, as §7.7.1's indices, encode it. -/
 theorem encodes_digits (p : Spec.Params) (soln : List Byte) (m : ℕ)
     (hlen : (bitsOfBytes soln).length = m * (p.digitBits + 1)) :
-    EncodesSolution p soln
-      (((List.range m).map (digitVal (p.digitBits + 1) (bitsOfBytes soln))).map (· + 1)) := by
-  unfold EncodesSolution
+    EncodesSolution p soln (succIndices p _ (digits_lt p (bitsOfBytes soln) m)) := by
+  rw [encodesSolution_iff, map_val_succIndices]
   conv_lhs => rw [← flatMap_chunks (p.digitBits + 1) m _ hlen]
   simp only [List.map_map, List.flatMap_map, Function.comp, Nat.add_sub_cancel]
   apply List.flatMap_congr
@@ -102,45 +112,52 @@ theorem length_flatMap_const {w : ℕ} (f : ℕ → Bits) (hf : ∀ x, (f x).len
   | nil => simp
   | cons x l ih => simp [List.flatMap_cons, hf, ih, Nat.succ_mul]; ring
 
-/-- An encoded solution of indices in `{1 .. 2^w}`, read back digit by digit, is its indices
-    less one. -/
-theorem digits_of_encodes (p : Spec.Params) (soln : List Byte) (i : List ℕ)
-    (h : EncodesSolution p soln i) (hb : ∀ j ∈ i, 1 ≤ j ∧ j ≤ 2 ^ (p.digitBits + 1)) :
+/-- An encoded solution, read back digit by digit, is its indices less one. -/
+theorem digits_of_encodes (p : Spec.Params) (soln : List Byte) (i : List (Index p))
+    (h : EncodesSolution p soln i) :
     (bitsOfBytes soln).length = i.length * (p.digitBits + 1) ∧
-      ∀ t (ht : t < i.length), digitVal (p.digitBits + 1) (bitsOfBytes soln) t = i[t] - 1 := by
-  unfold EncodesSolution at h
-  refine ⟨by rw [h, length_flatMap_const _ (fun x => length_I2BEBSP _ _)], fun t ht => ?_⟩
-  have hj := hb i[t] (List.getElem_mem ht)
-  rw [digitVal, h, chunk_flatMap _ _ (fun x => length_I2BEBSP _ _) i t ht, bitsVal_I2BEBSP,
-    Nat.mod_eq_of_lt (by omega)]
+      ∀ t (ht : t < i.length), digitVal (p.digitBits + 1) (bitsOfBytes soln) t = i[t].val - 1 := by
+  rw [encodesSolution_iff] at h
+  refine ⟨by rw [h, length_flatMap_const _ (fun x => length_I2BEBSP _ _), List.length_map],
+    fun t ht => ?_⟩
+  have hj := i[t].2
+  simp only [Params.N] at hj
+  rw [digitVal, h, chunk_flatMap _ _ (fun x => length_I2BEBSP _ _) _ t (by simpa using ht),
+    bitsVal_I2BEBSP, List.getElem_map, Nat.mod_eq_of_lt (by omega)]
 
-/-- The digits of solution bytes of the right length, one-based, are a valid solution exactly
-    when the bytes encode one. -/
+/-- The digits of solution bytes of the right length, as §7.7.1's indices, are a valid solution
+    exactly when the bytes encode one. -/
 theorem decoded_iff (p : ZakuraParams) (soln : List ℕ) (S : List Byte)
     (hBL : (bitsOfBytes (bytesOf soln)).length = 2 ^ p.k * (p.digitBits + 1)) :
-    ValidSolution Blake2b.hashFn p.toParams S (((List.range (2 ^ p.k)).map
-        (digitVal (p.digitBits + 1) (bitsOfBytes (bytesOf soln)))).map (· + 1)) ↔
+    ValidSolution Blake2b.hashFn p.toParams S
+        (succIndices p.toParams _ (digits_lt p.toParams (bitsOfBytes (bytesOf soln)) (2 ^ p.k))) ↔
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
         ValidSolution Blake2b.hashFn p.toParams S i := by
   set B := bitsOfBytes (bytesOf soln) with hB
-  set L := (List.range (2 ^ p.k)).map (digitVal (p.digitBits + 1) B) with hLdef
-  have hL : L.length = 2 ^ p.k := by simp [hLdef]
   constructor
   · intro hV
-    exact ⟨L.map (· + 1), encodes_digits _ _ _ (by rw [← hB, hBL, Nat.mul_comm]), hV⟩
+    exact ⟨_, encodes_digits _ _ _ (by rw [← hB, hBL, Nat.mul_comm]), hV⟩
   · rintro ⟨i, hE, hV⟩
-    obtain ⟨-, hdig⟩ := digits_of_encodes _ _ i hE fun j hj => hV.bounds j hj
-    have hi : L.map (· + 1) = i := by
-      apply List.ext_getElem (by simp [hL, hV.length])
+    obtain ⟨-, hdig⟩ := digits_of_encodes _ _ i hE
+    have hi : succIndices p.toParams _ (digits_lt p.toParams B (2 ^ p.k)) = i := by
+      apply List.ext_getElem (by simp [succIndices, hV.length])
       intro t h1 h2
-      have := (hV.bounds i[t] (List.getElem_mem h2)).1
-      simp only [List.getElem_map, hLdef, List.getElem_range]
+      have := i[t].2.1
+      apply Subtype.ext
+      simp only [succIndices, List.getElem_pmap, List.getElem_map, List.getElem_range]
       rw [hdig t h2]
       omega
     rw [hi]
     exact hV
 
 /-! ## The parameters -/
+
+/-- Zakura's digit width of at most 24 bits keeps `powcount`'s `g` below `2^32`: then
+    `N ≤ 2^25`. -/
+theorem powcount_fits_of_le {n k : ℕ} (h : n / (k + 1) ≤ 24) :
+    (2 ^ (n / (k + 1) + 1) - 1) / (512 / n) < 2 ^ 32 := by
+  have : 2 ^ (n / (k + 1) + 1) ≤ 2 ^ 25 := Nat.pow_le_pow_right (by norm_num) (by omega)
+  exact lt_of_le_of_lt (Nat.div_le_self _ _) (by omega)
 
 /-- `Params::new` accepts exactly the parameters `ZakuraParams` describes. -/
 theorem Params.new?_zakura (p : ZakuraParams) : Params.new? p.n p.k = some ⟨p.n, p.k⟩ := by
@@ -157,8 +174,8 @@ theorem Params.zakura_of_new? {n k : ℕ} {rp : Params} (h : Params.new? n k = s
   obtain ⟨h8, hk, hkn, hdvd, hn, hlo, hhi⟩ := hc
   cases h
   refine ⟨⟨⟨n, k, by omega, hk, Nat.dvd_of_mod_eq_zero hdvd, hn,
-    Dvd.dvd.mul_right (Nat.dvd_of_mod_eq_zero h8) _⟩, Nat.dvd_of_mod_eq_zero h8, hkn, hlo, hhi⟩,
-    rfl, rfl, rfl, rfl⟩
+    Dvd.dvd.mul_right (Nat.dvd_of_mod_eq_zero h8) _, powcount_fits_of_le hhi⟩,
+    Nat.dvd_of_mod_eq_zero h8, hkn, hlo, hhi⟩, rfl, rfl, rfl, rfl⟩
 
 /-! ## The hash -/
 
@@ -246,7 +263,7 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     simp only [hl, ↓reduceIte, run_throw, Option.some.injEq, reduceCtorEq, false_iff, not_exists,
       not_and]
     intro i hE hV
-    have := (digits_of_encodes _ _ i hE fun j hj => hV.bounds j hj).1
+    have := (digits_of_encodes _ _ i hE).1
     rw [← hB, hBl, hV.length, hr] at this
     omega
   simp only [hl, ↓reduceIte]
@@ -300,13 +317,13 @@ theorem validateTree?_iff_recursive {rp : Params} {p : ZakuraParams} (h : rp.Is 
 
 /-- Mainnet and Testnet: `n = 200`, `k = 9`. -/
 def zcashParams : ZakuraParams :=
-  ⟨⟨200, 9, by decide, by decide, by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide⟩
+  ⟨⟨200, 9, by decide, by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by decide, by decide, by decide⟩
 
 /-- Regtest: `n = 48`, `k = 5`. -/
 def regtestParams : ZakuraParams :=
-  ⟨⟨48, 5, by decide, by decide, by decide, by decide, by decide⟩, by decide, by decide,
-    by decide, by decide⟩
+  ⟨⟨48, 5, by decide, by decide, by decide, by decide, by decide, by decide⟩, by decide,
+    by decide, by decide, by decide⟩
 
 /-- **`is_valid_solution(200, 9, …)`** returns `Ok(())` exactly for the 1344-byte encodings of
     §7.7.1-valid solutions. -/
@@ -434,7 +451,7 @@ theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce 
     simp only [hl, ↓reduceIte, run_throw, Option.some.injEq, reduceCtorEq, false_iff, not_exists,
       not_and]
     intro i hE hV
-    have := (digits_of_encodes _ _ i hE fun j hj => hV.bounds j hj).1
+    have := (digits_of_encodes _ _ i hE).1
     rw [hBl, hV.length, hr] at this
     omega
   simp only [hl, ↓reduceIte]
@@ -595,7 +612,7 @@ theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraPar
     simp only [hl, ↓reduceIte, run_throw, Option.some.injEq, reduceCtorEq, false_iff, not_exists,
       not_and]
     intro i hE hV
-    have := (digits_of_encodes _ _ i hE fun j hj => hV.bounds j hj).1
+    have := (digits_of_encodes _ _ i hE).1
     rw [← hB, hBl, hV.length, hr] at this
     omega
   simp only [hl, ↓reduceIte]

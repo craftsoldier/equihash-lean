@@ -38,21 +38,41 @@ theorem genHashParams_len_le : (genHashParams p).len ≤ 64 := by
   simp only [genHashParams, Params.m]
   omega
 
-theorem length_X (i : ℕ) : (X H p S i).length = p.n := by
+/-- The hash value the Lean model of the verifiers computes for 0-based index `j`: §5.4.1.11's
+    `T_{h+1 .. h+n}`, with `powcount`'s `g` reduced mod `2^32` as the model's `u32ToLeBytes`
+    reduces it. It is defined for every `j`, as the model is; for `j < N` it is §7.7.1's
+    `X_{j+1}` (`X0_eq`). -/
+def X0 (j : ℕ) : Bits :=
+  let g : Fin (2 ^ 32) := ⟨j / p.m % 2 ^ 32, Nat.mod_lt _ (Nat.two_pow_pos _)⟩
+  let T := bitsOfBytes (H (genHashParams p) (S ++ powcount g)).toList
+  (T.drop ((j % p.m) * p.n)).take p.n
+
+/-- Every hash value has `n` bits: the slice `T_{h+1 .. h+n}` lies inside the `n·m`-bit `T`. -/
+theorem length_X0 (j : ℕ) : (X0 H p S j).length = p.n := by
   have hm := one_le_m p
   have hb : 8 ∣ p.n * p.m := p.bytes_dvd
-  simp only [X, equihashGen, List.length_take, List.length_drop, length_bitsOfBytes,
+  simp only [X0, List.length_take, List.length_drop, length_bitsOfBytes,
     List.Vector.toList_length, genHashParams]
-  have hlt : (i - 1) % p.m < p.m := Nat.mod_lt _ (by omega)
-  have : ((i - 1) % p.m) * p.n + p.n ≤ p.m * p.n := by
+  have hlt : j % p.m < p.m := Nat.mod_lt _ (by omega)
+  have : (j % p.m) * p.n + p.n ≤ p.m * p.n := by
     have := Nat.mul_le_mul_right p.n (Nat.succ_le_of_lt hlt); simpa [Nat.succ_mul] using this
   rw [Nat.mul_div_cancel' hb, Nat.mul_comm p.n p.m]
   omega
 
+/-- For an index below `N`, `powcount`'s `g = ⌊j/m⌋` fits in 32 bits (`powcount_fits`). -/
+theorem div_m_lt (j : ℕ) (h : j < p.N) : j / p.m < 2 ^ 32 :=
+  lt_of_le_of_lt (Nat.div_le_div_right (show j ≤ 2 ^ (p.n / (p.k + 1) + 1) - 1 by
+    simp only [Params.N, Params.digitBits] at h; omega)) p.powcount_fits
+
+/-- Below `N`, the hash value the verifiers compute is §7.7.1's `X_{j+1}`: reducing `g` mod
+    `2^32` changes nothing there (`div_m_lt`). -/
+theorem X0_eq (j : ℕ) (h : j < p.N) : X0 H p S j = X H p S ⟨j + 1, by omega, by omega⟩ := by
+  simp only [X0, X, equihashGen, Nat.add_sub_cancel, Nat.mod_eq_of_lt (div_m_lt p j h)]
+
 /-! ## The tree -/
 
 /-- The XOR of the hash values of the 0-based indices `is`. -/
-def blockXor (is : List ℕ) : Bits := xorAll p.n (is.map fun j => X H p S (j + 1))
+def blockXor (is : List ℕ) : Bits := xorAll p.n (is.map fun j => X0 H p S j)
 
 /-- What the verifier checks when it merges sibling blocks `L` and `R` of height `r`: their
     XORs agree on digit `r + 1` (counting from 1), `R` does not start before `L`, and they
@@ -70,17 +90,17 @@ def Good : ℕ → List ℕ → Prop
     Good r (is.take (2 ^ r)) ∧ Good r (is.drop (2 ^ r)) ∧
       Mergeable H p S r (is.take (2 ^ r)) (is.drop (2 ^ r))
 
-theorem blockXor_singleton (j : ℕ) : blockXor H p S [j] = X H p S (j + 1) := by
-  have hx := zeros_xor (X H p S (j + 1))
-  rw [length_X] at hx
+theorem blockXor_singleton (j : ℕ) : blockXor H p S [j] = X0 H p S j := by
+  have hx := zeros_xor (X0 H p S j)
+  rw [length_X0] at hx
   simpa [blockXor, xorAll] using hx
 
 theorem blockXor_append (l₁ l₂ : List ℕ) :
     blockXor H p S (l₁ ++ l₂) = xor (blockXor H p S l₁) (blockXor H p S l₂) := by
   simp only [blockXor, List.map_append]
   exact xorAll_append _ _ _
-    (fun x hx => by obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X H p S _)
-    (fun x hx => by obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X H p S _)
+    (fun x hx => by obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X0 H p S _)
+    (fun x hx => by obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X0 H p S _)
 
 /-! ## Blocks: the specification's flat view of the tree -/
 
@@ -259,7 +279,7 @@ theorem n_eq : p.n = (p.k + 1) * p.digitBits := (Nat.mul_div_cancel' p.n_dvd).sy
 
 theorem length_blockXor (is : List ℕ) : (blockXor H p S is).length = p.n :=
   length_xorAll _ _ fun x hx => by
-    obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X H p S _
+    obtain ⟨j, -, rfl⟩ := List.mem_map.mp hx; exact length_X0 H p S _
 
 theorem blockXor_split (l : List ℕ) (m : ℕ) :
     blockXor H p S l = xor (blockXor H p S (l.take m)) (blockXor H p S (l.drop m)) := by
@@ -300,7 +320,7 @@ theorem allBlocks_digit_iff_zeros (R : ℕ) (hR : R ≤ p.k + 1) (l : List ℕ)
 /-! ## The specification's notation -/
 
 /-- §7.7.1's `i_{w·2^r+1 .. w·2^r+2^r}` is block `w` at level `r`. -/
-theorem range_block (l : List ℕ) (f : ℕ → ℕ) (r w : ℕ) :
+theorem range_block {β : Type} (l : List ℕ) (f : ℕ → β) (r w : ℕ) :
     range (l.map f) (w * 2 ^ r + 1) (w * 2 ^ r + 2 ^ r) = (block r w l).map f := by
   simp only [range, block, List.map_take, List.map_drop]
   generalize 2 ^ r = t
@@ -334,6 +354,27 @@ theorem leadingZeros_eq (r : ℕ) : p.n * r / (p.k + 1) = r * p.digitBits := by
 
 /-! ## The tree's checks are §7.7.1's conditions -/
 
+/-- §7.7.1's indices `j + 1` for 0-based indices `j` below `N`. -/
+def succIndices (is : List ℕ) (hbound : ∀ j ∈ is, j < p.N) : List (Index p) :=
+  is.pmap (fun j hj => ⟨j + 1, by omega, by omega⟩) hbound
+
+/-- The values of `succIndices` are the indices plus one. -/
+theorem map_val_succIndices (is : List ℕ) (hbound : ∀ j ∈ is, j < p.N) :
+    (succIndices p is hbound).map (·.val) = is.map (· + 1) := by
+  simp [succIndices, List.map_pmap, List.pmap_eq_map]
+
+/-- §7.7.1's `X` of `succIndices` is the verifiers' hash value of each 0-based index (`X0_eq`). -/
+theorem map_X_succIndices (is : List ℕ) (hbound : ∀ j ∈ is, j < p.N) :
+    (succIndices p is hbound).map (X H p S) = is.map (X0 H p S) := by
+  simp only [succIndices, List.map_pmap]
+  rw [← List.pmap_eq_map (p := fun j => j < p.N) (H := hbound)]
+  exact List.pmap_congr_left _ fun j hj h₁ h₂ => (X0_eq H p S j h₂).symm
+
+/-- `range` and `map` commute. -/
+theorem range_map {α β : Type} (f : α → β) (l : List α) (a b : ℕ) :
+    range (l.map f) a b = (range l a b).map f := by
+  simp [range, List.map_take, List.map_drop]
+
 /-- **The tree's checks are §7.7.1's conditions.** For `2^k` indices below `N`, the tree is
     `Good` and the root's last digit is zero exactly when the indices (shifted to §7.7.1's
     1-based ones) are a valid solution. -/
@@ -341,9 +382,9 @@ theorem good_iff_validSolution (is : List ℕ) (hlen : is.length = 2 ^ p.k)
     (hbound : ∀ j ∈ is, j < p.N) :
     Good H p S p.k is ∧
         ((blockXor H p S is).drop (p.k * p.digitBits)).take p.digitBits = zeros p.digitBits ↔
-      ValidSolution H p S (is.map (· + 1)) := by
-  have hX : (is.map (· + 1)).map (X H p S) = is.map fun j => X H p S (j + 1) := by
-    simp [List.map_map, Function.comp_def]
+      ValidSolution H p S (succIndices p is hbound) := by
+  have hX := map_X_succIndices H p S is hbound
+  have hV := map_val_succIndices p is hbound
   -- The tree's checks, as three conditions on every block.
   rw [good_iff_allBlocks H p S _ _ hlen]
   have hsplit : AllBlocks (GoodAt H p S) p.k is ↔ _ :=
@@ -351,18 +392,18 @@ theorem good_iff_validSolution (is : List ℕ) (hlen : is.length = 2 ^ p.k)
   rw [hsplit, allBlocks_disjoint_iff_nodup _ _ hlen,
     allBlocks_digit_iff_zeros H p S _ (by omega) _ hlen]
   -- The specification's conditions, in the same terms.
-  have hcol : CollisionCondition H p S (is.map (· + 1)) ↔
+  have hcol : CollisionCondition H p S (succIndices p is hbound) ↔
       ∀ r, 1 ≤ r → r ≤ p.k - 1 → ∀ w < 2 ^ (p.k - r),
         HasLeadingZeros (r * p.digitBits) (blockXor H p S (block r w is)) := by
-    simp only [CollisionCondition, range_block, leadingZeros_eq, blockXor, List.map_map,
-      Function.comp_def]
-  have hord : OrderingCondition p (is.map (· + 1)) ↔
+    simp only [CollisionCondition, ← range_map, hX, range_block, leadingZeros_eq, blockXor]
+  have hord : OrderingCondition p (succIndices p is hbound) ↔
       AllBlocks (fun r b => List.Lex (· < ·) ((b.take (2 ^ (r - 1))).map (· + 1))
         ((b.drop (2 ^ (r - 1))).map (· + 1))) p.k is := by
+    simp only [OrderingCondition, hV]
     constructor <;> intro h r h1 h2 w hw
     · simpa [range_block_left _ _ h1, range_block_right _ _ h1] using h r h1 h2 w hw
     · simpa [range_block_left _ _ h1, range_block_right _ _ h1] using h r h1 h2 w hw
-  have hbirth : GeneralizedBirthday H p S (is.map (· + 1)) ↔
+  have hbirth : GeneralizedBirthday H p S (succIndices p is hbound) ↔
       blockXor H p S is = zeros (p.k * p.digitBits + p.digitBits) := by
     simp only [GeneralizedBirthday, hX, blockXor]
     rw [n_eq p, Nat.succ_mul]
@@ -385,16 +426,18 @@ theorem good_iff_validSolution (is : List ℕ) (hlen : is.length = 2 ^ p.k)
   have hlenX := length_blockXor H p S is
   rw [n_eq p, Nat.succ_mul] at hlenX
   -- The tree's duplicate check is on the 0-based indices, §7.7.1's `distinct` on the 1-based.
-  have hnodup : (is.map (· + 1)).Nodup ↔ is.Nodup := by simp [List.Nodup, List.pairwise_map]
+  have hnodup : (succIndices p is hbound).Nodup ↔ is.Nodup := by
+    have h : (succIndices p is hbound).Nodup ↔ ((succIndices p is hbound).map (·.val)).Nodup := by
+      unfold List.Nodup; rw [List.pairwise_map]; simp only [ne_eq, Subtype.ext_iff]
+    rw [h, hV]; unfold List.Nodup; rw [List.pairwise_map]; simp
   constructor
   · rintro ⟨⟨hD, hO, hN⟩, hroot⟩
     rw [allBlocks_order_iff_lex _ _ hlen hN, ← hord] at hO
     rw [htop] at hD
-    refine ⟨by simp [hlen], fun j hj => ?_, hnodup.mpr hN, ?_, hcol.mpr hD.1, hO⟩
-    · obtain ⟨j', hj', rfl⟩ := List.mem_map.mp hj; exact ⟨by omega, hbound j' hj'⟩
-    · rw [hbirth, eq_zeros_split _ _ _ hlenX, ← hasLeadingZeros_iff (by omega)]
-      exact ⟨hD.2, hroot⟩
-  · rintro ⟨-, -, hN, hB, hC, hO⟩
+    refine ⟨by simp [succIndices, hlen], hnodup.mpr hN, ?_, hcol.mpr hD.1, hO⟩
+    rw [hbirth, eq_zeros_split _ _ _ hlenX, ← hasLeadingZeros_iff (by omega)]
+    exact ⟨hD.2, hroot⟩
+  · rintro ⟨-, hN, hB, hC, hO⟩
     replace hN := hnodup.mp hN
     rw [hbirth, eq_zeros_split _ _ _ hlenX, ← hasLeadingZeros_iff (by omega)] at hB
     refine ⟨⟨htop.mpr ⟨hcol.mp hC, hB.1⟩, ?_, hN⟩, hB.2⟩

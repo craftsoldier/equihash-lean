@@ -35,9 +35,10 @@ namespace Equihash.Spec
 /-- Bit sequences. The specification indexes them from 1. -/
 abbrev Bits := List Bool
 
-/-- `I2LEOSP_ℓ(x)` (§5.1): the `⌈ℓ/8⌉` bytes representing `x` in little-endian order. -/
-def I2LEOSP (ℓ x : ℕ) : List Byte :=
-  (List.range ((ℓ + 7) / 8)).map fun j => BitVec.ofNat 8 (x / 256 ^ j)
+/-- `I2LEOSP_ℓ(x)` (§5.1): the `⌈ℓ/8⌉` bytes representing `x ∈ {0 .. 2^ℓ − 1}` in
+    little-endian order. -/
+def I2LEOSP (ℓ : ℕ) (x : Fin (2 ^ ℓ)) : List Byte :=
+  (List.range ((ℓ + 7) / 8)).map fun j => BitVec.ofNat 8 (x.val / 256 ^ j)
 
 /-- `I2BEBSP_ℓ(x)` (§5.1): the `ℓ` bits representing `x` in big-endian order. -/
 def I2BEBSP (ℓ x : ℕ) : Bits :=
@@ -62,6 +63,9 @@ structure Params where
   n_dvd : (k + 1) ∣ n
   n_le : n ≤ 512
   bytes_dvd : 8 ∣ n * (512 / n)
+  /-- **Not stated in the specification.** `powcount(g)` is a 32-bit `g` (§5.4.1.11), with
+      `g = ⌊(i−1)/m⌋` for `i` up to `N`, so the largest `g` must be below `2^32`. -/
+  powcount_fits : (2 ^ (n / (k + 1) + 1) - 1) / (512 / n) < 2 ^ 32
 
 namespace Params
 
@@ -78,6 +82,9 @@ def m : ℕ := 512 / p.n
 
 end Params
 
+/-- An index `i ∈ {1 .. N}` (§7.7.1). -/
+abbrev Index (p : Params) := {i : ℕ // 1 ≤ i ∧ i ≤ p.N}
+
 /-! ## The Equihash generator (§5.4.1.11) -/
 
 /-- The ASCII bytes of `"ZcashPoW"`. -/
@@ -86,10 +93,12 @@ def zcashPoW : List Byte := [0x5A, 0x63, 0x61, 0x73, 0x68, 0x50, 0x6F, 0x57]
 /-- > Let `powtag := 64-bit "ZcashPoW" ‖ 32-bit n ‖ 32-bit k`.
 
 The 32-bit integers are little-endian (§5.1, and the note at the end of §7.7.1). -/
-def powtag (p : Params) : List Byte := zcashPoW ++ I2LEOSP 32 p.n ++ I2LEOSP 32 p.k
+def powtag (p : Params) : List Byte :=
+  zcashPoW ++ I2LEOSP 32 ⟨p.n, by have := p.n_le; omega⟩ ++
+    I2LEOSP 32 ⟨p.k, by have := Nat.le_of_dvd p.n_pos p.n_dvd; have := p.n_le; omega⟩
 
 /-- > Let `powcount(g) := 32-bit g`. -/
-def powcount (g : ℕ) : List Byte := I2LEOSP 32 g
+def powcount (g : Fin (2 ^ 32)) : List Byte := I2LEOSP 32 g
 
 /-- `BLAKE2b-(n·m)` personalized by `powtag`: `n·m / 8` output bytes. -/
 def genHashParams (p : Params) : HashParams where
@@ -105,15 +114,18 @@ def genHashParams (p : Params) : HashParams where
     >   the same order as the bytes.
     >
     > Indices of bits in `T` are 1-based. -/
-def equihashGen (H : HashFn) (p : Params) (S : List Byte) (i : ℕ) : Bits :=
-  let h := ((i - 1) % p.m) * p.n
-  let T := bitsOfBytes (H (genHashParams p) (S ++ powcount ((i - 1) / p.m))).toList
+def equihashGen (H : HashFn) (p : Params) (S : List Byte) (i : Index p) : Bits :=
+  let h := ((i.val - 1) % p.m) * p.n
+  let g : Fin (2 ^ 32) := ⟨(i.val - 1) / p.m, lt_of_le_of_lt (Nat.div_le_div_right
+    (show i.val - 1 ≤ 2 ^ (p.n / (p.k + 1) + 1) - 1 by
+      have := i.2.2; simp only [Params.N, Params.digitBits] at this; omega)) p.powcount_fits⟩
+  let T := bitsOfBytes (H (genHashParams p) (S ++ powcount g)).toList
   (T.drop h).take p.n
 
 /-! ## Valid solutions (§7.7.1) -/
 
 /-- > For `i ∈ {1 .. N}`, let `X_i = EquihashGen_{n,k}(powheader, i)`. -/
-def X (H : HashFn) (p : Params) (powheader : List Byte) (i : ℕ) : Bits :=
+def X (H : HashFn) (p : Params) (powheader : List Byte) (i : Index p) : Bits :=
   equihashGen H p powheader i
 
 /-- `a ⊕ b`: bitwise exclusive or. -/
@@ -126,17 +138,17 @@ def xorAll (n : ℕ) (xs : List Bits) : Bits := xs.foldl xor (List.replicate n f
 def HasLeadingZeros (z : ℕ) (x : Bits) : Prop := ∀ b ∈ x.take z, b = false
 
 /-- `i_{a .. b}`: the elements of `i` at positions `a` to `b`, counting from 1. -/
-def range (i : List ℕ) (a b : ℕ) : List ℕ := (i.drop (a - 1)).take (b + 1 - a)
+def range {α : Type} (i : List α) (a b : ℕ) : List α := (i.drop (a - 1)).take (b + 1 - a)
 
 /-- > **Generalized Birthday condition** `⊕_{j=1}^{2^k} X_{i_j} = 0`. -/
-def GeneralizedBirthday (H : HashFn) (p : Params) (powheader : List Byte) (i : List ℕ) :
+def GeneralizedBirthday (H : HashFn) (p : Params) (powheader : List Byte) (i : List (Index p)) :
     Prop :=
   xorAll p.n (i.map (X H p powheader)) = List.replicate p.n false
 
 /-- > **Algorithm Binding conditions**
     > * For all `r ∈ {1 .. k−1}`, for all `w ∈ {0 .. 2^(k−r) − 1}`:
     >   `⊕_{j=1}^{2^r} X_{i_{w·2^r + j}}` has `n·r/(k+1)` leading zeros; and -/
-def CollisionCondition (H : HashFn) (p : Params) (powheader : List Byte) (i : List ℕ) :
+def CollisionCondition (H : HashFn) (p : Params) (powheader : List Byte) (i : List (Index p)) :
     Prop :=
   ∀ r, 1 ≤ r → r ≤ p.k - 1 → ∀ w < 2 ^ (p.k - r),
     HasLeadingZeros (p.n * r / (p.k + 1))
@@ -145,21 +157,20 @@ def CollisionCondition (H : HashFn) (p : Params) (powheader : List Byte) (i : Li
 /-- > * For all `r ∈ {1 .. k}`, for all `w ∈ {0 .. 2^(k−r) − 1}`:
     >   `i_{w·2^r + 1 .. w·2^r + 2^(r−1)} < i_{w·2^r + 2^(r−1) + 1 .. w·2^r + 2^r}`
     >   lexicographically. -/
-def OrderingCondition (p : Params) (i : List ℕ) : Prop :=
+def OrderingCondition (p : Params) (i : List (Index p)) : Prop :=
   ∀ r, 1 ≤ r → r ≤ p.k → ∀ w < 2 ^ (p.k - r),
     List.Lex (· < ·)
-      (range i (w * 2 ^ r + 1) (w * 2 ^ r + 2 ^ (r - 1)))
-      (range i (w * 2 ^ r + 2 ^ (r - 1) + 1) (w * 2 ^ r + 2 ^ r))
+      (range (i.map (·.val)) (w * 2 ^ r + 1) (w * 2 ^ r + 2 ^ (r - 1)))
+      (range (i.map (·.val)) (w * 2 ^ r + 2 ^ (r - 1) + 1) (w * 2 ^ r + 2 ^ r))
 
 /-- > A valid Equihash solution is then a sequence `i : {1 .. N}^(2^k)` of *distinct* indices
     > that satisfies the following conditions: [the Generalized Birthday and Algorithm Binding
     > conditions]
 
 `powheader` is the block header followed by the nonce. -/
-structure ValidSolution (H : HashFn) (p : Params) (powheader : List Byte) (i : List ℕ) :
+structure ValidSolution (H : HashFn) (p : Params) (powheader : List Byte) (i : List (Index p)) :
     Prop where
   length : i.length = 2 ^ p.k
-  bounds : ∀ j ∈ i, 1 ≤ j ∧ j ≤ p.N
   distinct : i.Nodup
   birthday : GeneralizedBirthday H p powheader i
   collision : CollisionCondition H p powheader i
@@ -179,7 +190,7 @@ the indices in turn.
 
 **Not stated in the specification.** The encoding for other parameters: each index in
 `n/(k+1) + 1` bits, which is 21 for `n = 200, k = 9`. -/
-def EncodesSolution (p : Params) (solution : List Byte) (i : List ℕ) : Prop :=
-  bitsOfBytes solution = i.flatMap fun j => I2BEBSP (p.digitBits + 1) (j - 1)
+def EncodesSolution (p : Params) (solution : List Byte) (i : List (Index p)) : Prop :=
+  bitsOfBytes solution = i.flatMap fun j => I2BEBSP (p.digitBits + 1) (j.val - 1)
 
 end Equihash.Spec
