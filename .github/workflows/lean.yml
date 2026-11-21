@@ -70,6 +70,35 @@ jobs:
             printf '%s\n' "${pinned[@]}" | grep -qxF "$entry" \
               || { echo "::error::$entry has no pin"; exit 1; }
           done < <(find rust -mindepth 1 -maxdepth 1)
+      # Each `.tex` file in `spec/` is lines of the protocol specification, copied verbatim
+      # below a four-line header whose first line names them:
+      #   % Source: zcash/zips commit <sha>, protocol/protocol.tex lines <first>-<last>
+      # The commit must be on zcash/zips `main`. This checks the copy, not the labels on lines
+      # 2–3, nor that the lines are the whole section.
+      - name: Check the specification excerpts
+        run: |
+          set -euo pipefail
+          git clone -q --filter=blob:none --no-checkout --single-branch --branch main \
+            https://github.com/zcash/zips.git "$RUNNER_TEMP/zips"
+          for file in spec/*.tex; do
+            re='^% Source: zcash/zips commit ([0-9a-f]{40}), protocol/protocol\.tex lines ([0-9]+)-([0-9]+)$'
+            [[ $(head -n 1 "$file") =~ $re ]] || { echo "::error::$file: no source line"; exit 1; }
+            commit=${BASH_REMATCH[1]} first=${BASH_REMATCH[2]} last=${BASH_REMATCH[3]}
+            git -C "$RUNNER_TEMP/zips" merge-base --is-ancestor "$commit" origin/main \
+              || { echo "::error::$file: $commit is not on zcash/zips main"; exit 1; }
+            diff <(git -C "$RUNNER_TEMP/zips" show "$commit:protocol/protocol.tex" | sed -n "${first},${last}p") \
+              <(tail -n +5 "$file") \
+              || { echo "::error::$file differs from protocol.tex lines $first-$last at $commit"; exit 1; }
+            echo "$file: matches protocol.tex lines $first-$last at $commit"
+          done
+          # Every entry in `spec/`, hidden or not, is an excerpt or the license.
+          while read -r entry; do
+            case "$entry" in
+              spec/.*) echo "::error::$entry is hidden, so the check above skips it"; exit 1 ;;
+              spec/COPYING.rst | spec/*.tex) ;;
+              *) echo "::error::$entry is neither an excerpt nor the license"; exit 1 ;;
+            esac
+          done < <(find spec -mindepth 1 -maxdepth 1)
       - uses: leanprover/lean-action@24581d74d674803a25a81b10b059c5c0cdd344c6 # v1.6.2
         with:
           auto-config: "false"

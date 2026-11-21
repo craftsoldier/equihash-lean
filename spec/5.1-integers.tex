@@ -1,6 +1,6 @@
-% Source: zcash/zips commit 2bdf39494320e5e04057ac93b1794031ebfb00b5, protocol/protocol.tex lines 8898-8937
-% Spec version: v2026.7.0-344-g2bdf39 [NU6.2], section 5.1 "Integers, Bit Sequences, and Endianness"
-% Pinned: 2026-10-24
+% Source: zcash/zips commit 1c3631b99d521c45e5fac7eb2c9acb8621d2b525, protocol/protocol.tex lines 9257-9296
+% Spec version: v2026.9.1 [NU7], section 5.1 "Integers, Bit Sequences, and Endianness"
+% Pinned: 2026-11-21
 
 \lsubsection{Integers, Bit Sequences, and Endianness}{endian}
 
@@ -17,7 +17,7 @@ and integers:
         such that $\ItoLEBSPOf{\ell}{x}$ is the sequence of $\ell$ bits representing $x$ in
         little-endian order;
   \item $\ItoLEOSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} \rightarrow \byteseq{\sceiling{\ell/8}}$,
-        such that $\ItoLEBSPOf{\ell}{x}$ is the sequence of $\ceiling{\ell/8}$ bytes representing $x$ in
+        such that $\ItoLEOSPOf{\ell}{x}$ is the sequence of $\ceiling{\ell/8}$ bytes representing $x$ in
         little-endian order;
   \item $\ItoBEBSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} \rightarrow \bitseq{\ell}$
         such that $\ItoBEBSPOf{\ell}{x}$ is the sequence of $\ell$ bits representing $x$ in
