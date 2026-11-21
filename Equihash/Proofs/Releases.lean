@@ -19,27 +19,36 @@ open Equihash Equihash.Spec
 
 /-! ## The encoding -/
 
-theorem length_I2BEBSP (w x : ℕ) : (I2BEBSP w x).length = w := by simp [I2BEBSP]
+/-- `I2BEBSP`'s formula on any `ℕ`, for the proofs: the low `w` bits of `x`, most significant
+    first. On `Fin (2^w)` it is `I2BEBSP` (`I2BEBSP_eq_bebits`). -/
+def bebits (w x : ℕ) : Bits := (List.range w).map fun j => x.testBit (w - 1 - j)
 
-theorem I2BEBSP_succ (w x : ℕ) : I2BEBSP (w + 1) x = x.testBit w :: I2BEBSP w x := by
-  simp only [I2BEBSP, List.range_succ_eq_map, List.map_cons, List.map_map, List.cons.injEq]
+/-- On its domain, `I2BEBSP` is `bebits` of the value, by definition. -/
+theorem I2BEBSP_eq_bebits (w : ℕ) (x : Fin (2 ^ w)) : I2BEBSP w x = bebits w x.val := rfl
+
+/-- `bebits w x` has `w` bits. -/
+theorem length_bebits (w x : ℕ) : (bebits w x).length = w := by simp [bebits]
+
+/-- One more bit puts `x`'s bit `w` in front: the most significant bit comes first. -/
+theorem bebits_succ (w x : ℕ) : bebits (w + 1) x = x.testBit w :: bebits w x := by
+  simp only [bebits, List.range_succ_eq_map, List.map_cons, List.map_map, List.cons.injEq]
   refine ⟨by simp, List.map_congr_left fun j _ => ?_⟩
   simp only [Function.comp, Nat.succ_eq_add_one]
   congr 1
   omega
 
-/-- `I2BEBSP_w(x)`, read back: `x mod 2^w`. -/
-theorem bitsVal_I2BEBSP (w x : ℕ) : bitsVal (I2BEBSP w x) = x % 2 ^ w := by
+/-- `bebits w x`, read back: `x mod 2^w`. -/
+theorem bitsVal_bebits (w x : ℕ) : bitsVal (bebits w x) = x % 2 ^ w := by
   induction w with
-  | zero => simp [I2BEBSP, bitsVal, Nat.mod_one]
+  | zero => simp [bebits, bitsVal, Nat.mod_one]
   | succ w ih =>
-    rw [I2BEBSP_succ, bitsVal_cons, length_I2BEBSP, ih, Nat.toNat_testBit, Nat.pow_succ,
+    rw [bebits_succ, bitsVal_cons, length_bebits, ih, Nat.toNat_testBit, Nat.pow_succ,
       Nat.mod_mul]
     ring
 
-/-- A bit sequence is `I2BEBSP` of its value. -/
-theorem I2BEBSP_bitsVal (b : Bits) : I2BEBSP b.length (bitsVal b) = b :=
-  bitsVal_inj (length_I2BEBSP _ _) (by rw [bitsVal_I2BEBSP, Nat.mod_eq_of_lt (bitsVal_lt b)])
+/-- A bit sequence is `bebits` of its value. -/
+theorem bebits_bitsVal (b : Bits) : bebits b.length (bitsVal b) = b :=
+  bitsVal_inj (length_bebits _ _) (by rw [bitsVal_bebits, Nat.mod_eq_of_lt (bitsVal_lt b)])
 
 /-- `m` chunks of `w` bits, in turn, make up `m·w` bits. -/
 theorem flatMap_chunks (w : ℕ) : ∀ (m : ℕ) (B : Bits), B.length = m * w →
@@ -79,8 +88,8 @@ theorem chunk_flatMap (w : ℕ) (f : ℕ → Bits) (hf : ∀ x, (f x).length = w
 /-- `EncodesSolution` depends only on the indices' values. -/
 theorem encodesSolution_iff (p : Spec.Params) (soln : List Byte) (i : List (Index p)) :
     EncodesSolution p soln i ↔
-      bitsOfBytes soln = (i.map (·.val)).flatMap fun j => I2BEBSP (p.digitBits + 1) (j - 1) := by
-  simp [EncodesSolution]
+      bitsOfBytes soln = (i.map (·.val)).flatMap fun j => bebits (p.digitBits + 1) (j - 1) := by
+  simp [EncodesSolution, I2BEBSP_eq_bebits]
 
 /-- Every digit of `digitBits + 1` bits is a 0-based index below `N`. -/
 theorem digits_lt (p : Spec.Params) (B : Bits) (m : ℕ) :
@@ -101,7 +110,7 @@ theorem encodes_digits (p : Spec.Params) (soln : List Byte) (m : ℕ)
   have hc : (((bitsOfBytes soln).drop (t * (p.digitBits + 1))).take (p.digitBits + 1)).length =
       p.digitBits + 1 := by
     rw [List.length_take, List.length_drop, hlen, Nat.succ_mul] at *; omega
-  have := I2BEBSP_bitsVal (((bitsOfBytes soln).drop (t * (p.digitBits + 1))).take
+  have := bebits_bitsVal (((bitsOfBytes soln).drop (t * (p.digitBits + 1))).take
     (p.digitBits + 1))
   rw [hc] at this
   rw [digitVal, this]
@@ -118,12 +127,12 @@ theorem digits_of_encodes (p : Spec.Params) (soln : List Byte) (i : List (Index 
     (bitsOfBytes soln).length = i.length * (p.digitBits + 1) ∧
       ∀ t (ht : t < i.length), digitVal (p.digitBits + 1) (bitsOfBytes soln) t = i[t].val - 1 := by
   rw [encodesSolution_iff] at h
-  refine ⟨by rw [h, length_flatMap_const _ (fun x => length_I2BEBSP _ _), List.length_map],
+  refine ⟨by rw [h, length_flatMap_const _ (fun x => length_bebits _ _), List.length_map],
     fun t ht => ?_⟩
   have hj := i[t].2
   simp only [Params.N] at hj
-  rw [digitVal, h, chunk_flatMap _ _ (fun x => length_I2BEBSP _ _) _ t (by simpa using ht),
-    bitsVal_I2BEBSP, List.getElem_map, Nat.mod_eq_of_lt (by omega)]
+  rw [digitVal, h, chunk_flatMap _ _ (fun x => length_bebits _ _) _ t (by simpa using ht),
+    bitsVal_bebits, List.getElem_map, Nat.mod_eq_of_lt (by omega)]
 
 /-- The digits of solution bytes of the right length, as §7.7.1's indices, are a valid solution
     exactly when the bytes encode one. -/
