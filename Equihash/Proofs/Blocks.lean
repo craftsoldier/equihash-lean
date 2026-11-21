@@ -3,8 +3,7 @@
 
 The verifier checks a solution bottom up: it splits a block of `2^r` indices into halves,
 checks each, then merges them. `Good` states what it checks, on the indices and their hash
-values, and `good_iff_validSolution` shows that these checks are §7.7.1's conditions plus
-distinct indices.
+values, and `good_iff_validSolution` shows that these checks are §7.7.1's conditions.
 
 Indices here are 0-based, as encoded in a block header: index `j` is `j + 1` in §7.7.1.
 -/
@@ -337,12 +336,12 @@ theorem leadingZeros_eq (r : ℕ) : p.n * r / (p.k + 1) = r * p.digitBits := by
 
 /-- **The tree's checks are §7.7.1's conditions.** For `2^k` indices below `N`, the tree is
     `Good` and the root's last digit is zero exactly when the indices (shifted to §7.7.1's
-    1-based ones) are a valid solution with no index repeated. -/
+    1-based ones) are a valid solution. -/
 theorem good_iff_validSolution (is : List ℕ) (hlen : is.length = 2 ^ p.k)
     (hbound : ∀ j ∈ is, j < p.N) :
     Good H p S p.k is ∧
         ((blockXor H p S is).drop (p.k * p.digitBits)).take p.digitBits = zeros p.digitBits ↔
-      ValidSolution H p S (is.map (· + 1)) ∧ is.Nodup := by
+      ValidSolution H p S (is.map (· + 1)) := by
   have hX : (is.map (· + 1)).map (X H p S) = is.map fun j => X H p S (j + 1) := by
     simp [List.map_map, Function.comp_def]
   -- The tree's checks, as three conditions on every block.
@@ -385,15 +384,18 @@ theorem good_iff_validSolution (is : List ℕ) (hlen : is.length = 2 ^ p.k)
         simpa [block_top _ _ hlen] using htop
   have hlenX := length_blockXor H p S is
   rw [n_eq p, Nat.succ_mul] at hlenX
+  -- The tree's duplicate check is on the 0-based indices, §7.7.1's `distinct` on the 1-based.
+  have hnodup : (is.map (· + 1)).Nodup ↔ is.Nodup := by simp [List.Nodup, List.pairwise_map]
   constructor
   · rintro ⟨⟨hD, hO, hN⟩, hroot⟩
     rw [allBlocks_order_iff_lex _ _ hlen hN, ← hord] at hO
     rw [htop] at hD
-    refine ⟨⟨by simp [hlen], fun j hj => ?_, ?_, hcol.mpr hD.1, hO⟩, hN⟩
+    refine ⟨by simp [hlen], fun j hj => ?_, hnodup.mpr hN, ?_, hcol.mpr hD.1, hO⟩
     · obtain ⟨j', hj', rfl⟩ := List.mem_map.mp hj; exact ⟨by omega, hbound j' hj'⟩
     · rw [hbirth, eq_zeros_split _ _ _ hlenX, ← hasLeadingZeros_iff (by omega)]
       exact ⟨hD.2, hroot⟩
-  · rintro ⟨⟨-, -, hB, hC, hO⟩, hN⟩
+  · rintro ⟨-, -, hN, hB, hC, hO⟩
+    replace hN := hnodup.mp hN
     rw [hbirth, eq_zeros_split _ _ _ hlenX, ← hasLeadingZeros_iff (by omega)] at hB
     refine ⟨⟨htop.mpr ⟨hcol.mp hC, hB.1⟩, ?_, hN⟩, hB.2⟩
     rw [allBlocks_order_iff_lex _ _ hlen hN, ← hord]; exact hO

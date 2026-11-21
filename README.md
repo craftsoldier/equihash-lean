@@ -2,7 +2,7 @@
 
 Zcash's proof of work is Equihash. This repository is a Lean 4 proof, release by release, that
 the Equihash verifiers Zcash software runs accept exactly the solutions the Zcash protocol
-specification (§7.7.1) calls valid, with distinct indices. Each theorem states its hypotheses:
+specification (§7.7.1) calls valid. Each theorem states its hypotheses:
 
 - `zakura-equihash` 5.4.0, and every release from 4.0.0 to 5.4.0, whose source is the same: for
   a 140-byte header and nonce, under each of its leaf-hashing kernels. The portable, AVX2 and
