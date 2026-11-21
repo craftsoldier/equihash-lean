@@ -13,8 +13,8 @@ namespace Equihash
 
 /-- The parameters Zakura's verifier accepts. `Params::new` (`src/params.rs`) checks
     `8 ∣ n`, `k ≥ 3`, `k < n`, `(k + 1) ∣ n`, `n ≤ 512` and `8 ≤ n / (k + 1) ≤ 24`: the fields
-    below and those of `Spec.Params`, whose other two (`0 < n`, `8 ∣ n · ⌊512/n⌋`) follow
-    from them. -/
+    below and those of `Spec.Params`, whose other three (`0 < n`, `8 ∣ n · ⌊512/n⌋` and
+    `powcount_fits`) follow from them. -/
 structure ZakuraParams extends Spec.Params where
   n_dvd_8 : 8 ∣ n
   k_lt : k < n

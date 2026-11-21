@@ -870,8 +870,8 @@ theorem leafRow (h : rp.Is p) {st : Blake2b.State} (hst : StateFor p.toParams S 
     split_ifs at hs with hse
     simp only [Option.some.injEq] at hs
     rw [← hs, List.length_take, List.length_drop]; omega
-  have hlenX : (X Blake2b.hashFn p.toParams S (L[c] + 1)).length / p.digitBits = p.k + 1 := by
-    rw [length_X, n_eq p.toParams, Nat.mul_div_cancel _ (by omega)]
+  have hlenX : (X0 Blake2b.hashFn p.toParams S L[c]).length / p.digitBits = p.k + 1 := by
+    rw [length_X0, n_eq p.toParams, Nat.mul_div_cancel _ (by omega)]
   have hol : out.length = (p.k + 1) * ((p.digitBits + 7) / 8) := by rw [hE.1, hlenX]
   have hexp : expandedLen bytes.length rp.collisionBitLength 0 =
       (p.k + 1) * ((p.digitBits + 7) / 8) := by

@@ -23,10 +23,16 @@ theorem divCeil_eq (x y : ℕ) (hy : 0 < y) : divCeil x y = (x + y - 1) / y := b
     simp only [Nat.succ_mul, Nat.mul_comm q y] <;> omega
 
 /-- `u32::to_le_bytes` is the specification's `I2LEOSP_32`. -/
-theorem u32ToLeBytes_eq (x : ℕ) : (u32ToLeBytes x).map (BitVec.ofNat 8) = Spec.I2LEOSP 32 x := by
+theorem u32ToLeBytes_eq (x : Fin (2 ^ 32)) :
+    (u32ToLeBytes x.val).map (BitVec.ofNat 8) = Spec.I2LEOSP 32 x := by
   have hmod : ∀ y, BitVec.ofNat 8 (y % 256) = BitVec.ofNat 8 y := fun y => by
     apply BitVec.eq_of_toNat_eq; simp
   simp [u32ToLeBytes, Spec.I2LEOSP, List.range_succ, hmod]
+
+/-- `u32ToLeBytes` reads only the low 32 bits of its `ℕ` argument, as `u32::to_le_bytes` has
+    only those: the four bytes of `x` are those of `x mod 2^32`. -/
+theorem u32ToLeBytes_mod (x : ℕ) : u32ToLeBytes (x % 2 ^ 32) = u32ToLeBytes x := by
+  simp only [u32ToLeBytes, List.cons.injEq, and_true]; omega
 
 theorem slice?_eq {α : Type} (s : List α) (start «end» : ℕ) (h : start ≤ «end»)
     (h' : «end» ≤ s.length) :

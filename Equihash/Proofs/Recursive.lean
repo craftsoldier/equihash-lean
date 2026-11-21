@@ -115,12 +115,14 @@ theorem isValidSolutionRecursive?_iff (h : rp.Is p) (input nonce indices : List 
     encoding can express; the verifier does not check it), `is_valid_solution_recursive`
     returns `Ok(())` exactly for the solutions valid by §7.7.1, for `powheader` the input
     followed by the nonce; otherwise it returns an `Err`, and it never panics
-    (`isValidSolutionRecursive?_spec`). -/
+    (`isValidSolutionRecursive?_spec`). The solution is the indices plus one, as §7.7.1's
+    indices (`succIndices`, `map_val_succIndices`). -/
 theorem isValidSolutionRecursive?_correct (h : rp.Is p) (input nonce indices : List ℕ)
     (hin : Bytes input) (hnon : Bytes nonce) (hlen : indices.length = 2 ^ p.k)
     (hbound : ∀ j ∈ indices, j < p.N) :
     (isValidSolutionRecursive? rp input nonce indices).run = some (.ok ()) ↔
-      ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) (indices.map (· + 1)) :=
+      ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce))
+        (succIndices p.toParams indices hbound) :=
   (isValidSolutionRecursive?_iff h input nonce indices hin hnon hlen).trans
     (good_iff_validSolution _ _ _ _ hlen hbound)
 
