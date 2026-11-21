@@ -1,7 +1,7 @@
 /-
 Each release's `is_valid_solution` on the two real blocks of `Tests/Spec.lean`, and the cases of
 the crate's own tests of it (`src/verify.rs`), with the error the crate expects: first
-`zakura-equihash 4.0.0`, then `equihash 0.3.0`, then `equihash 0.3.1`. The blocks are verified
+`zakura-equihash 5.4.0`, then `equihash 0.3.0`, then `equihash 0.3.1`. The blocks are verified
 under every leaf-hashing kernel, and the kernels are compared with `blake2b_simd` as the crate
 compares them; the rest runs the portable kernel.
 -/

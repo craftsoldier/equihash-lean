@@ -1,11 +1,12 @@
-% Source: zcash/zips commit 2bdf39494320e5e04057ac93b1794031ebfb00b5, protocol/protocol.tex lines 14384-14508
-% Spec version: v2026.7.0-344-g2bdf39 [NU6.2], section 7.7.1 "Equihash"
-% Pinned: 2026-10-24
+% Source: zcash/zips commit 1c3631b99d521c45e5fac7eb2c9acb8621d2b525, protocol/protocol.tex lines 14862-14987
+% Spec version: v2026.9.1 [NU7], section 7.7.1 "Equihash"
+% Pinned: 2026-11-21
 
 \lsubsubsection{Equihash}{equihash}
 
 An instance of the \defining{\Equihash} algorithm is parameterized by positive integers $n$ and $k$,
-such that $n$ is a multiple of $k+1$. We assume $k \geq 3$.
+such that $n$ is a multiple of $k+1$. We assume $k \geq 3$, $n \leq 512$, and
+$(n \mult \floor{\frac{512}{n}}) \bmod 8 = 0$.
 
 The \Equihash parameters for \Mainnet and \Testnet are $n = 200, k = 9$.
 
@@ -41,8 +42,8 @@ Define $\ItoBEBSP{} \typecolon (\ell \typecolon \Nat) \times \binaryrange{\ell} 
 as in \crossref{endian}.
 
 \introsection
-A \defining{\validEquihashSolution} is then a sequence $i \typecolon \range{1}{N}^{2^k}$ that
-satisfies the following conditions:
+A \defining{\validEquihashSolution} is then a sequence $i \typecolon \range{1}{N}^{2^k}$ of
+\emph{distinct} indices that satisfies the following conditions:
 
 \callout{}{Generalized Birthday condition}
 $\vxor{j=1}{2^k} X_{i_j} = 0$.

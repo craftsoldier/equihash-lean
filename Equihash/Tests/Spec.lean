@@ -1,11 +1,10 @@
 /-
-The specification on two real blocks (`zakura-equihash 4.0.0`, `src/test_vectors/zcash.rs`):
+The specification on two real blocks (`zakura-equihash 5.4.0`, `src/test_vectors/zcash.rs`):
 Zcash mainnet block 415000 (lines 5–44, `n = 200, k = 9`) and the Regtest genesis block
 (lines 50–61, `n = 48, k = 5`). Each solution is valid, and its bytes are its encoding.
 
-§5.4.1.11 takes bits of the BLAKE2b output without saying in which order; `Spec.lean` reads
-each byte most significant bit first. The mainnet block is valid read that way, and not the
-other.
+§5.4.1.11 reads each byte of the BLAKE2b output most significant bit first, as `Spec.lean`
+does. The mainnet block is valid read that way, and not the other.
 -/
 import Equihash
 
@@ -28,9 +27,9 @@ instance (p : Spec.Params) (i : List ℕ) : Decidable (OrderingCondition p i) :=
 
 instance (H : HashFn) (p : Spec.Params) (S : List Byte) (i : List ℕ) :
     Decidable (ValidSolution H p S i) :=
-  decidable_of_iff (i.length = 2 ^ p.k ∧ (∀ j ∈ i, 1 ≤ j ∧ j ≤ p.N) ∧
+  decidable_of_iff (i.length = 2 ^ p.k ∧ (∀ j ∈ i, 1 ≤ j ∧ j ≤ p.N) ∧ i.Nodup ∧
       GeneralizedBirthday H p S i ∧ CollisionCondition H p S i ∧ OrderingCondition p i)
-    ⟨fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩, fun ⟨a, b, c, d, e⟩ => ⟨a, b, c, d, e⟩⟩
+    ⟨fun ⟨a, b, c, d, e, f⟩ => ⟨a, b, c, d, e, f⟩, fun ⟨a, b, c, d, e, f⟩ => ⟨a, b, c, d, e, f⟩⟩
 
 instance (p : Spec.Params) (s : List Byte) (i : List ℕ) : Decidable (EncodesSolution p s i) := by
   unfold EncodesSolution; infer_instance

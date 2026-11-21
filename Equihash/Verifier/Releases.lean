@@ -3,7 +3,7 @@ Each published crate's `is_valid_solution`, built from the shared verifier piece
 
 | Crate             | Version | Verifier                    | Source                        |
 |-------------------|---------|-----------------------------|-------------------------------|
-| `zakura-equihash` | 4.0.0   | single-pass, 140-byte input | `rust/zakura-equihash-4.0.0/` |
+| `zakura-equihash` | 5.4.0   | single-pass, 140-byte input | `rust/zakura-equihash-5.4.0/` |
 | `equihash`        | 0.3.0   | recursive, any input        | `rust/equihash-0.3.0/`        |
 | `equihash`        | 0.3.1   | single-pass, any input      | `rust/equihash-0.3.1/`        |
 
@@ -20,7 +20,7 @@ public import Equihash.Verifier.SinglePass
 
 namespace Equihash.Verifier
 
-/-- `zakura-equihash 4.0.0`'s `is_valid_solution` (`src/verify.rs`, lines 269–280) for `soln`, a
+/-- `zakura-equihash 5.4.0`'s `is_valid_solution` (`src/verify.rs`, lines 269–280) for `soln`, a
     minimally encoded solution for `input ‖ nonce` with parameters `n` and `k`, on a CPU where
     `Kernel::detect()` picks `kernel` (see `LeafHasher.new?`). -/
 def isValidSolution? (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ) :
@@ -77,7 +77,7 @@ def isValidSolutionRecursive_equihash_0_3_0? (p : Params) (input nonce : List �
 
 `Node::new`, `tree_validator` and `is_valid_solution_recursive` are transcribed above, since
 `Node::new` calls 0.3.0's `expand_array`. The other functions they call (`src/verify.rs`, lines
-16–168) have the bodies of `zakura-equihash 4.0.0`'s test-only copies (`Verifier/Recursive.lean`),
+16–168) have the bodies of `zakura-equihash 5.4.0`'s test-only copies (`Verifier/Recursive.lean`),
 but for `initialise_state`, which spells out `"ZcashPoW"` where Zakura names it. Around them,
 0.3.0's `Kind` has no `UnsupportedInputLength`, which none of them returns, and only visibility
 and `cfg(test)` differ. -/
@@ -105,11 +105,12 @@ def blake2bSimdHash? (state : Blake2b.State) (blocks : List ℕ) (digests : List
     minimally encoded solution for `input ‖ nonce` of any length, with parameters `n` and `k`,
     on a CPU where `Kernel::detect()` picks `kernel`.
 
-0.3.1 is `zakura-equihash 4.0.0`'s verifier backported: its `src/params.rs`, `src/minimal.rs`,
-`src/leaf_hash.rs` and `src/verify/tree.rs` are Zakura's files, but for visibility, formatting
-and parentheses, `"ZcashPoW"` spelled out in `leaf_hash.rs`, one more test, and the
-`unsafe-verifier` feature, which gates the AVX2 and NEON kernels and is off by default: a
-default build compiles only `Kernel::Portable`, so `kernel` is `.portable` for it.
+0.3.1 is `zakura-equihash 4.0.0`'s verifier backported (the same source as 5.4.0's): its
+`src/params.rs`, `src/minimal.rs`, `src/leaf_hash.rs` and `src/verify/tree.rs` are Zakura's
+files, but for visibility, formatting and parentheses, `"ZcashPoW"` spelled out in
+`leaf_hash.rs`, one more test, and the `unsafe-verifier` feature, which gates the AVX2 and NEON
+kernels and is off by default: a default build compiles only `Kernel::Portable`, so `kernel` is
+`.portable` for it.
 `src/verify.rs` keeps 0.3.0's recursive verifier for tests only, and `Kind` has no
 `UnsupportedInputLength`. Two differences reach `is_valid_solution`: `Params::new` makes
 0.3.0's four checks (`src/params.rs`, lines 9–20; `Params.newUnbounded?`) before Zakura's

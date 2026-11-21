@@ -43,21 +43,17 @@ def I2LEOSP (ℓ x : ℕ) : List Byte :=
 def I2BEBSP (ℓ x : ℕ) : Bits :=
   (List.range ℓ).map fun j => x.testBit (ℓ - 1 - j)
 
-/-- The bits of a byte sequence, each byte's most significant bit first.
-
-**Not stated in the specification.** §5.4.1.11 takes bits of the BLAKE2b output `T`, a byte
-sequence, without saying in which order. This is the order §5.2 uses ("the bits ordered
-from most significant to least significant"). -/
+/-- The bits of a byte sequence, each byte's most significant bit first: how §5.4.1.11 turns the
+    BLAKE2b output into `T` (see `equihashGen`), and how §5.2 orders the bits of `solution` (see
+    `EncodesSolution`). -/
 def bitsOfBytes (bs : List Byte) : Bits :=
   bs.flatMap fun b => (List.range 8).map fun j => b.getMsbD j
 
 /-! ## Parameters (§7.7.1) -/
 
 /-- > An instance of the Equihash algorithm is parameterized by positive integers `n` and
-    > `k`, such that `n` is a multiple of `k + 1`. We assume `k ≥ 3`.
-
-**Not stated in the specification.** §5.4.1.11 only makes sense when `m = ⌊512/n⌋ ≥ 1`, so
-`n ≤ 512`, and when `BLAKE2b-(n·m)` outputs whole bytes, so `8 ∣ n·m`. -/
+    > `k`, such that `n` is a multiple of `k + 1`. We assume `k ≥ 3`, `n ≤ 512`, and
+    > `(n·⌊512/n⌋) mod 8 = 0`. -/
 structure Params where
   n : ℕ
   k : ℕ
@@ -103,7 +99,10 @@ def genHashParams (p : Params) : HashParams where
 /-- > Let `EquihashGen_{n,k}(S, i) := T_{h+1 .. h+n}`, where
     > * `m = ⌊512/n⌋`;
     > * `h = (i − 1 mod m) · n`;
-    > * `T = BLAKE2b-(n·m)(powtag, S ‖ powcount(⌊(i−1)/m⌋))`.
+    > * `T` is the bit sequence obtained from the byte sequence
+    >   `BLAKE2b-(n·m)(powtag, S ‖ powcount(⌊(i−1)/m⌋))` by converting each byte to a group of
+    >   8 bits with the *most* significant bit first, and concatenating the resulting groups in
+    >   the same order as the bytes.
     >
     > Indices of bits in `T` are 1-based. -/
 def equihashGen (H : HashFn) (p : Params) (S : List Byte) (i : ℕ) : Bits :=
@@ -152,14 +151,16 @@ def OrderingCondition (p : Params) (i : List ℕ) : Prop :=
       (range i (w * 2 ^ r + 1) (w * 2 ^ r + 2 ^ (r - 1)))
       (range i (w * 2 ^ r + 2 ^ (r - 1) + 1) (w * 2 ^ r + 2 ^ r))
 
-/-- > A valid Equihash solution is then a sequence `i : {1 .. N}^(2^k)` that satisfies the
-    > following conditions: [the Generalized Birthday and Algorithm Binding conditions]
+/-- > A valid Equihash solution is then a sequence `i : {1 .. N}^(2^k)` of *distinct* indices
+    > that satisfies the following conditions: [the Generalized Birthday and Algorithm Binding
+    > conditions]
 
 `powheader` is the block header followed by the nonce. -/
 structure ValidSolution (H : HashFn) (p : Params) (powheader : List Byte) (i : List ℕ) :
     Prop where
   length : i.length = 2 ^ p.k
   bounds : ∀ j ∈ i, 1 ≤ j ∧ j ≤ p.N
+  distinct : i.Nodup
   birthday : GeneralizedBirthday H p powheader i
   collision : CollisionCondition H p powheader i
   ordering : OrderingCondition p i
