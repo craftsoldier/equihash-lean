@@ -139,7 +139,8 @@ def regtestSolution : List ℕ :=
 -- §7.7.1's own example: indices beginning `69, 42, 2^21` encode to bytes beginning
 -- `0, 2, 32, 0, 10, 127, 255`.
 #guard bitsOfBytes (bytesOf [0, 2, 32, 0, 10, 127, 255]) =
-  ([69, 42, 2 ^ 21].flatMap fun j => I2BEBSP 21 (j - 1)).take 56
+  (I2BEBSP 21 ⟨69 - 1, by decide⟩ ++ I2BEBSP 21 ⟨42 - 1, by decide⟩ ++
+    I2BEBSP 21 ⟨2 ^ 21 - 1, by decide⟩).take 56
 
 /-- Byte `b` with its bits reversed. -/
 def reverseBits (b : ℕ) : ℕ := (List.range 8).foldl (fun acc j => 2 * acc + b / 2 ^ j % 2) 0

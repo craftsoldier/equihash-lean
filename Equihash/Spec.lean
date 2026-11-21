@@ -40,9 +40,10 @@ abbrev Bits := List Bool
 def I2LEOSP (ℓ : ℕ) (x : Fin (2 ^ ℓ)) : List Byte :=
   (List.range ((ℓ + 7) / 8)).map fun j => BitVec.ofNat 8 (x.val / 256 ^ j)
 
-/-- `I2BEBSP_ℓ(x)` (§5.1): the `ℓ` bits representing `x` in big-endian order. -/
-def I2BEBSP (ℓ x : ℕ) : Bits :=
-  (List.range ℓ).map fun j => x.testBit (ℓ - 1 - j)
+/-- `I2BEBSP_ℓ(x)` (§5.1; §7.7.1 repeats it): the `ℓ` bits representing `x ∈ {0 .. 2^ℓ − 1}`
+    in big-endian order. -/
+def I2BEBSP (ℓ : ℕ) (x : Fin (2 ^ ℓ)) : Bits :=
+  (List.range ℓ).map fun j => x.val.testBit (ℓ - 1 - j)
 
 /-- The bits of a byte sequence, each byte's most significant bit first: how §5.4.1.11 turns the
     BLAKE2b output into `T` (see `equihashGen`), and how §5.2 orders the bits of `solution` (see
@@ -191,6 +192,7 @@ the indices in turn.
 **Not stated in the specification.** The encoding for other parameters: each index in
 `n/(k+1) + 1` bits, which is 21 for `n = 200, k = 9`. -/
 def EncodesSolution (p : Params) (solution : List Byte) (i : List (Index p)) : Prop :=
-  bitsOfBytes solution = i.flatMap fun j => I2BEBSP (p.digitBits + 1) (j.val - 1)
+  bitsOfBytes solution = i.flatMap fun j =>
+    I2BEBSP (p.digitBits + 1) ⟨j.val - 1, by have := j.2; simp only [Params.N] at this; omega⟩
 
 end Equihash.Spec
