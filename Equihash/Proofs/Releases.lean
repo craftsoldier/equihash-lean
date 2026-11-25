@@ -218,7 +218,8 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     (isValidSolution? kernel n k input nonce soln).run = some (.ok ()) ↔
       ∃ p : ZakuraParams, p.n = n ∧ p.k = k ∧ 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
         ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-          ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+          ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   unfold isValidSolution?
   rcases hnew : Params.new? n k with _ | rp
   · -- Parameters `Params::new` rejects.
@@ -331,7 +332,7 @@ theorem isValidSolution?_zcash (kernel : Kernel) (input nonce soln : List ℕ) (
     (hnon : Bytes nonce) (hsoln : Bytes soln) (hlen : input.length + nonce.length = 140) :
     (isValidSolution? kernel 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
   rw [isValidSolution?_correct kernel 200 9 input nonce soln hin hnon hsoln hlen]
   exact ⟨fun ⟨p, hn, hk, _, hrest⟩ => ZakuraParams.ext' (p := p) (q := zcashParams) hn hk ▸ hrest,
     fun hrest => ⟨zcashParams, rfl, rfl, by decide, hrest⟩⟩
@@ -342,7 +343,7 @@ theorem isValidSolution?_regtest (kernel : Kernel) (input nonce soln : List ℕ)
     (hlen : input.length + nonce.length = 140) :
     (isValidSolution? kernel 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
   rw [isValidSolution?_correct kernel 48 5 input nonce soln hin hnon hsoln hlen]
   exact ⟨fun ⟨p, hn, hk, _, hrest⟩ =>
       ZakuraParams.ext' (p := p) (q := regtestParams) hn hk ▸ hrest,
@@ -428,7 +429,8 @@ theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce 
     (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) :
     (isValidSolution_equihash_0_3_0? p.n p.k input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
   have hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 := by omega
   unfold isValidSolution_equihash_0_3_0?
@@ -459,7 +461,7 @@ theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce 
       (digitVal (p.digitBits + 1) (bitsOfBytes (bytesOf soln)))).length = 2 ^ p.k := by simp
   rw [isValidSolutionRecursive?_correct h input nonce _ hin hnon hL (fun j hj => by
     obtain ⟨t, -, rfl⟩ := List.mem_map.mp hj
-    exact digitVal_lt _ _ _)]
+    exact digitVal_lt _ _ _), ← Blake2b.hashFn_eq]
   exact decoded_iff p soln _ (by rw [hBl, hl, hr])
 
 /-- **`equihash 0.3.0`'s `is_valid_solution(200, 9, …)`** returns `Ok(())` exactly for the
@@ -468,7 +470,7 @@ theorem isValidSolution_equihash_0_3_0?_zcash (input nonce soln : List ℕ) (hin
     (hnon : Bytes nonce) (hsoln : Bytes soln) :
     (isValidSolution_equihash_0_3_0? 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i :=
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i :=
   isValidSolution_equihash_0_3_0?_correct zcashParams input nonce soln hin hnon hsoln (by decide)
 
 /-- **`equihash 0.3.0`'s `is_valid_solution(48, 5, …)`**, likewise. -/
@@ -476,7 +478,7 @@ theorem isValidSolution_equihash_0_3_0?_regtest (input nonce soln : List ℕ) (h
     (hnon : Bytes nonce) (hsoln : Bytes soln) :
     (isValidSolution_equihash_0_3_0? 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i :=
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i :=
   isValidSolution_equihash_0_3_0?_correct regtestParams input nonce soln hin hnon hsoln
     (by decide)
 
@@ -582,7 +584,8 @@ theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraPar
     (isValidSolution_equihash_0_3_1? kernel p.n p.k input nonce soln).run = some (.ok ()) ↔
       2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
   unfold isValidSolution_equihash_0_3_1?
   rw [Params.newUnbounded?_zakura]
@@ -658,7 +661,7 @@ theorem isValidSolution_equihash_0_3_1?_zcash (kernel : Kernel) (input nonce sol
     (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
     (isValidSolution_equihash_0_3_1? kernel 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
   exact (isValidSolution_equihash_0_3_1?_correct kernel zcashParams input nonce soln hin hnon
     hsoln).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
 
@@ -667,7 +670,7 @@ theorem isValidSolution_equihash_0_3_1?_regtest (kernel : Kernel) (input nonce s
     (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
     (isValidSolution_equihash_0_3_1? kernel 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
   exact (isValidSolution_equihash_0_3_1?_correct kernel regtestParams input nonce soln hin hnon
     hsoln).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
 

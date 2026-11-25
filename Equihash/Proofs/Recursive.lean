@@ -6,6 +6,7 @@ module
 
 public import Equihash.Proofs.Erase
 public import Equihash.Proofs.Node
+public import Equihash.Proofs.Blake2bSpec
 
 @[expose] public section
 
@@ -121,9 +122,10 @@ theorem isValidSolutionRecursive?_correct (h : rp.Is p) (input nonce indices : L
     (hin : Bytes input) (hnon : Bytes nonce) (hlen : indices.length = 2 ^ p.k)
     (hbound : ∀ j ∈ indices, j < p.N) :
     (isValidSolutionRecursive? rp input nonce indices).run = some (.ok ()) ↔
-      ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce))
-        (succIndices p.toParams indices hbound) :=
-  (isValidSolutionRecursive?_iff h input nonce indices hin hnon hlen).trans
+      ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce))
+        (succIndices p.toParams indices hbound) := by
+  rw [← Blake2b.hashFn_eq]
+  exact (isValidSolutionRecursive?_iff h input nonce indices hin hnon hlen).trans
     (good_iff_validSolution _ _ _ _ hlen hbound)
 
 -- The build fails if the theorem rests on anything beyond Lean's three axioms.
