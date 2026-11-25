@@ -1,0 +1,36 @@
+% Source: zcash/zips commit 1c3631b99d521c45e5fac7eb2c9acb8621d2b525, protocol/protocol.tex lines 9516-9547
+% Spec version: v2026.9.1 [NU7], section 5.4.1.2 "BLAKE2 Hash Functions"
+% Pinned: 2026-11-25
+
+\lsubsubsubsection{BLAKE2 Hash Functions}{concreteblake2}
+
+\vspace{-1ex}
+BLAKE2 is defined by \cite{ANWW2013}.
+\sapling{\Zcash uses both the $\BlakeTwobGeneric$ and $\BlakeTwosGeneric$
+variants.}
+
+$\BlakeTwobOf{\ell}{p, x}$ refers to unkeyed $\BlakeTwob{\ell}$
+in sequential mode, with an output digest length of $\ell/8$ bytes,
+$16$-byte personalization string $p$, and input $x$.
+
+\introlist
+$\BlakeTwobGeneric$ is used to instantiate $\hSigCRH$, $\EquihashGen{}$,
+and $\KDF{Sprout}$.
+\overwinter{From \NUOverwinter onward, it is used to compute \sighashTxHashes
+as specified in \cite{ZIP-143}\sapling{, or as in \cite{ZIP-243} after \NUSapling
+activation}\nufive{, or as in \cite{ZIP-244} for version 5 \transactions}\nusixthree{,
+or as in \cite{ZIP-229} for version 6 \transactions}.}
+\sapling{For \Sapling, it is also used to instantiate $\PRFexpand{}$,
+$\PRFock{Sapling}{}$, $\KDF{Sapling}$, and in the $\RedJubjub$ \signatureScheme
+which instantiates $\SpendAuthSig{Sapling}$ and $\BindingSig{Sapling}$.}
+
+\begin{formulae}
+  \item $\BlakeTwob{\ell} \typecolon \byteseq{16} \times \byteseqs \rightarrow \byteseq{\ell/8}$
+\end{formulae}
+
+\vspace{-1.5ex}
+\pnote{
+$\BlakeTwob{\ell}$ is not the same as $\BlakeTwob{512}$ truncated to
+$\ell$ bits, because the digest length is encoded in the parameter
+block.
+}
