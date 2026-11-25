@@ -93,6 +93,52 @@ def mm256ShuffleEpi32 (imm8 : ℕ) (a : M256i) : M256i := .ofWords fun w =>
   let sel := fun j => vecDword a.word (4 * (w / 2) + (imm8 >>> (2 * j)) % 4)
   sel (2 * (w % 2)) ||| sel (2 * (w % 2) + 1) <<< 32
 
+/-- `_mm256_slli_epi64::<IMM8>(a)`: each 64-bit element shifted left by `IMM8` bits, zero when
+    `IMM8` exceeds 63. -/
+def mm256SlliEpi64 (imm8 : ℕ) (a : M256i) : M256i :=
+  .ofWords fun w => if imm8 > 63 then 0 else a.word w <<< UInt64.ofNat imm8
+
+/-- `_mm256_unpacklo_epi64(a, b)`: in each 128-bit lane, `a`'s low 64 bits, then `b`'s. -/
+def mm256UnpackloEpi64 (a b : M256i) : M256i := ⟨a.w0, b.w0, a.w2, b.w2⟩
+
+/-- `_mm256_unpackhi_epi64(a, b)`: in each 128-bit lane, `a`'s high 64 bits, then `b`'s. -/
+def mm256UnpackhiEpi64 (a b : M256i) : M256i := ⟨a.w1, b.w1, a.w3, b.w3⟩
+
+/-- `_mm256_blend_epi32::<IMM8>(a, b)`: 32-bit element `j` from `b` when bit `j` of `IMM8` is set,
+    otherwise from `a`. -/
+def mm256BlendEpi32 (imm8 : ℕ) (a b : M256i) : M256i := .ofWords fun w =>
+  let pick := fun j => if (imm8 >>> j) % 2 = 1 then vecDword b.word j else vecDword a.word j
+  pick (2 * w) ||| pick (2 * w + 1) <<< 32
+
+/-- `_mm256_alignr_epi8::<IMM8>(a, b)`: in each 128-bit lane, `a`'s 16 bytes above `b`'s,
+    shifted right by `IMM8` bytes, and the low 16 bytes kept; zero when `IMM8` exceeds 31. -/
+def mm256AlignrEpi8 (imm8 : ℕ) (a b : M256i) : M256i := .ofWords (wordOfBytes fun k =>
+  let i := k % 16 + imm8
+  if i < 16 then vecByte b.word (16 * (k / 16) + i)
+  else if i < 32 then vecByte a.word (16 * (k / 16) + i - 16) else 0)
+
+/-- `_mm256_permute4x64_epi64::<IMM8>(a)`: word `w` is `a`'s word `IMM8[2w+1 : 2w]`. -/
+def mm256Permute4x64Epi64 (imm8 : ℕ) (a : M256i) : M256i :=
+  .ofWords fun w => a.word ((imm8 >>> (2 * w)) % 4)
+
+/-- `_mm256_setr_epi64x(e3, e2, e1, e0)`: word 0 is `e3`, the first argument, up to word 3,
+    `e0` (the Guide names the arguments from the last). -/
+def mm256SetrEpi64x (e3 e2 e1 e0 : UInt64) : M256i := ⟨e3, e2, e1, e0⟩
+
+/-- `__m128i`: 128 bits, as two words, `w0` the least significant. -/
+structure M128i where
+  w0 : UInt64
+  w1 : UInt64
+deriving Inhabited
+
+/-- `_mm_loadu_si128(p)`: the 16 bytes at `p`, here a `[u8; 16]`. -/
+def mmLoaduSi128 (p : List ℕ) : M128i :=
+  ⟨wordOfBytes (fun k => UInt64.ofNat (p.getD k 0)) 0,
+    wordOfBytes (fun k => UInt64.ofNat (p.getD k 0)) 1⟩
+
+/-- `_mm256_broadcastsi128_si256(a)`: `a` in both 128-bit lanes. -/
+def mm256Broadcastsi128Si256 (a : M128i) : M256i := ⟨a.w0, a.w1, a.w0, a.w1⟩
+
 end X86_64
 
 /-! ## `core::arch::aarch64` -/
