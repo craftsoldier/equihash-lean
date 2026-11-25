@@ -60,9 +60,9 @@ decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
 
 /-- `equihash 0.3.0`'s `is_valid_solution_recursive` (lines 221–239): `isValidSolutionRecursive?`,
     but with 0.3.0's `tree_validator`. -/
-def isValidSolutionRecursive_equihash_0_3_0? (p : Params) (input nonce : List ℕ)
-    (indices : List ℕ) : ExceptT Kind Option Unit := do
-  let mut state ← initialiseState? p.n p.k p.hashOutput
+def isValidSolutionRecursive_equihash_0_3_0? (impl : Blake2b.Implementation) (p : Params)
+    (input nonce : List ℕ) (indices : List ℕ) : ExceptT Kind Option Unit := do
+  let mut state ← initialiseState? impl p.n p.k p.hashOutput
   state := state.update input
   state := state.update nonce
   let root ← treeValidator_equihash_0_3_0? p state indices
@@ -80,13 +80,15 @@ def isValidSolutionRecursive_equihash_0_3_0? (p : Params) (input nonce : List �
 16–168) have the bodies of `zakura-equihash 5.4.0`'s test-only copies (`Verifier/Recursive.lean`),
 but for `initialise_state`, which spells out `"ZcashPoW"` where Zakura names it. Around them,
 0.3.0's `Kind` has no `UnsupportedInputLength`, which none of them returns, and only visibility
-and `cfg(test)` differ. -/
-def isValidSolution_equihash_0_3_0? (n k : ℕ) (input nonce soln : List ℕ) :
+and `cfg(test)` differ. `impl` is the `blake2b_simd` implementation `Implementation::detect`
+picks. -/
+def isValidSolution_equihash_0_3_0? (impl : Blake2b.Implementation) (n k : ℕ)
+    (input nonce soln : List ℕ) :
     ExceptT Kind Option Unit := do
   let some p := Params.newUnbounded? n k | throw .InvalidParams
   let some indices ← indicesFromMinimalWrapping? p soln | throw .InvalidParams
   -- Recursive validation is faster.
-  isValidSolutionRecursive_equihash_0_3_0? p input nonce indices
+  isValidSolutionRecursive_equihash_0_3_0? impl p input nonce indices
 
 /-- The closure `equihash 0.3.1`'s `is_valid_solution` hashes with when `input ‖ nonce` is not
     140 bytes (`src/verify.rs`, lines 276–281): `blake2b_simd`'s digest of each block, from
@@ -117,14 +119,15 @@ kernels and is off by default: a default build compiles only `Kernel::Portable`,
 checked `solution_bytes` (lines 22–28), and `LeafHasher::new` returning `None`
 (`src/leaf_hash.rs`, lines 378–380) is no error: the verifier then hashes with `blake2b_simd`,
 through 0.3.0's `initialise_state` and `generate_hash` (lines 129–147), as
-`is_valid_solution_recursive` does. -/
-def isValidSolution_equihash_0_3_1? (kernel : Kernel) (n k : ℕ) (input nonce soln : List ℕ) :
+`is_valid_solution_recursive` does, with the `blake2b_simd` implementation `impl`. -/
+def isValidSolution_equihash_0_3_1? (kernel : Kernel) (impl : Blake2b.Implementation) (n k : ℕ)
+    (input nonce soln : List ℕ) :
     ExceptT Kind Option Unit := do
   let some p := Params.newUnbounded? n k | throw .InvalidParams
   let some indices ← indicesFromMinimal? p soln | throw .InvalidParams
   if let some hasher ← LeafHasher.new? p input nonce kernel then
     return ← validateTree? p indices fun blocks digests => hasher.hash? blocks digests
-  let mut state ← initialiseState? p.n p.k p.hashOutput
+  let mut state ← initialiseState? impl p.n p.k p.hashOutput
   state := state.update input
   state := state.update nonce
   validateTree? p indices (blake2bSimdHash? state)

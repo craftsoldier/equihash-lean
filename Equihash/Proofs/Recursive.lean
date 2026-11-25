@@ -77,15 +77,17 @@ theorem treeValidator?_spec (h : rp.Is p) {S : List Byte} {st : Blake2b.State}
     `is_valid_solution_recursive` returns `Ok` or `Err`, and `Ok(())` exactly when the indices
     form a `Good` tree whose root's last digit is zero, for BLAKE2b over the input followed by
     the nonce. -/
-theorem isValidSolutionRecursive?_spec (h : rp.Is p) (input nonce indices : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hlen : indices.length = 2 ^ p.k) :
-    ∃ e, (isValidSolutionRecursive? rp input nonce indices).run = some e ∧
+theorem isValidSolutionRecursive?_spec (impl : Blake2b.Implementation) (h : rp.Is p)
+    (input nonce indices : List ℕ) (hin : Bytes input) (hnon : Bytes nonce)
+    (hsz : input.length + nonce.length < 2 ^ 64) (hlen : indices.length = 2 ^ p.k) :
+    ∃ e, (isValidSolutionRecursive? impl rp input nonce indices).run = some e ∧
       (e = .ok () ↔ Good Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) p.k indices ∧
         (rest p (bytesOf (input ++ nonce)) p.k indices).take p.digitBits =
           zeros p.digitBits) := by
-  obtain ⟨st, hst0, hst⟩ := initialiseState?_spec h
+  obtain ⟨st, hst0, hst⟩ := initialiseState?_spec h impl
   have hst' : StateFor p.toParams (bytesOf (input ++ nonce)) ((st.update input).update nonce) := by
-    simpa [List.map_append] using (hst.update input hin).update nonce hnon
+    simpa [List.map_append] using
+      (hst.update input hin (by simp; omega)).update nonce hnon (by simp; omega)
   have hT := treeValidator?_spec h hst' p.k indices le_rfl hlen
   simp only [isValidSolutionRecursive?, hst0, monadLift_some, pure_bind, ExceptT.run_bind]
   rcases ht : (treeValidator? rp ((st.update input).update nonce) indices).run with
@@ -104,28 +106,33 @@ theorem isValidSolutionRecursive?_spec (h : rp.Is p) (input nonce indices : List
 
 /-- **`is_valid_solution_recursive`** returns `Ok(())` exactly when the indices form a `Good`
     tree whose root's last digit is zero. -/
-theorem isValidSolutionRecursive?_iff (h : rp.Is p) (input nonce indices : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hlen : indices.length = 2 ^ p.k) :
-    (isValidSolutionRecursive? rp input nonce indices).run = some (.ok ()) ↔
+theorem isValidSolutionRecursive?_iff (impl : Blake2b.Implementation) (h : rp.Is p)
+    (input nonce indices : List ℕ) (hin : Bytes input) (hnon : Bytes nonce)
+    (hsz : input.length + nonce.length < 2 ^ 64) (hlen : indices.length = 2 ^ p.k) :
+    (isValidSolutionRecursive? impl rp input nonce indices).run = some (.ok ()) ↔
       Good Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) p.k indices ∧
         (rest p (bytesOf (input ++ nonce)) p.k indices).take p.digitBits = zeros p.digitBits := by
-  obtain ⟨e, he, hiff⟩ := isValidSolutionRecursive?_spec h input nonce indices hin hnon hlen
+  obtain ⟨e, he, hiff⟩ :=
+    isValidSolutionRecursive?_spec impl h input nonce indices hin hnon hsz hlen
   rw [he, Option.some_inj, hiff]
 
 /-- **The recursive verifier is correct.** On `2^k` indices below `N` (the range the minimal
-    encoding can express; the verifier does not check it), `is_valid_solution_recursive`
-    returns `Ok(())` exactly for the solutions valid by §7.7.1, for `powheader` the input
-    followed by the nonce; otherwise it returns an `Err`, and it never panics
+    encoding can express; the verifier does not check it), under either `blake2b_simd`
+    implementation and for an input and nonce under `2^64` bytes, as two Rust slices are,
+    `is_valid_solution_recursive` returns `Ok(())` exactly for the solutions valid by §7.7.1,
+    for `powheader` the input followed by the nonce; otherwise it returns an `Err`, and it
+    never panics
     (`isValidSolutionRecursive?_spec`). The solution is the indices plus one, as §7.7.1's
     indices (`succIndices`, `map_val_succIndices`). -/
-theorem isValidSolutionRecursive?_correct (h : rp.Is p) (input nonce indices : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hlen : indices.length = 2 ^ p.k)
+theorem isValidSolutionRecursive?_correct (impl : Blake2b.Implementation) (h : rp.Is p)
+    (input nonce indices : List ℕ) (hin : Bytes input) (hnon : Bytes nonce)
+    (hsz : input.length + nonce.length < 2 ^ 64) (hlen : indices.length = 2 ^ p.k)
     (hbound : ∀ j ∈ indices, j < p.N) :
-    (isValidSolutionRecursive? rp input nonce indices).run = some (.ok ()) ↔
+    (isValidSolutionRecursive? impl rp input nonce indices).run = some (.ok ()) ↔
       ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce))
         (succIndices p.toParams indices hbound) := by
   rw [← Blake2b.hashFn_eq]
-  exact (isValidSolutionRecursive?_iff h input nonce indices hin hnon hlen).trans
+  exact (isValidSolutionRecursive?_iff impl h input nonce indices hin hnon hsz hlen).trans
     (good_iff_validSolution _ _ _ _ hlen hbound)
 
 -- The build fails if the theorem rests on anything beyond Lean's three axioms.

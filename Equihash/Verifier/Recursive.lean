@@ -9,71 +9,13 @@ A Rust panic is `none`; a function returning a Rust `Result` is into `ExceptT Ki
 -/
 module
 
-public import Equihash.Verifier.Blake2b
+public import Equihash.Verifier.Blake2bSimd
 public import Equihash.Verifier.Error
 public import Equihash.Verifier.Lib
 public import Equihash.Verifier.Minimal
 public import Equihash.Verifier.Params
 
 @[expose] public section
-
-namespace Equihash.Verifier.Blake2b
-
-/-! ## The `blake2b_simd` interface -/
-
-/-- `OUTBYTES`: the largest output length, in bytes. -/
-def outBytes : ℕ := 64
-
-/-- `PERSONALBYTES`: the length of a personalization, in bytes. -/
-def personalBytes : ℕ := 16
-
-/-- `blake2b_simd::Params`, reduced to the fields the verifier sets. -/
-structure Params where
-  hashLength : ℕ
-  personal : List ℕ
-
-/-- `Params::new`: output length `OUTBYTES`, zero personalization. -/
-def Params.new : Params := { hashLength := outBytes, personal := List.replicate personalBytes 0 }
-
-/-- `Params::hash_length`:
-
-```rust
-assert!(1 <= length && length <= OUTBYTES, "Bad hash length: {}", length);
-self.hash_length = length as u8;
-``` -/
-def Params.hashLength? (self : Params) (length : ℕ) : Option Params := do
-  guard (1 ≤ length ∧ length ≤ outBytes)
-  return { self with hashLength := length }
-
-/-- `Params::personal`:
-
-```rust
-assert!(personalization.len() <= PERSONALBYTES, ...);
-self.personal = [0; PERSONALBYTES];
-self.personal[..personalization.len()].copy_from_slice(personalization);
-``` -/
-def Params.personal? (self : Params) (personalization : List ℕ) : Option Params := do
-  guard (personalization.length ≤ personalBytes)
-  return { self with
-    personal := personalization ++ List.replicate (personalBytes - personalization.length) 0 }
-
-/-- `blake2b_simd::State`: the parameters it was built from, and the input absorbed so far. -/
-structure State where
-  params : Params
-  input : List ℕ
-
-/-- `Params::to_state`. -/
-def Params.toState (self : Params) : State := { params := self, input := [] }
-
-/-- `State::update`. -/
-def State.update (self : State) (input : List ℕ) : State :=
-  { self with input := self.input ++ input }
-
-/-- `State::finalize`, then `Hash::as_bytes`: the hash of everything absorbed. -/
-def State.finalize (self : State) : List ℕ :=
-  blake2b self.params.hashLength self.params.personal self.input
-
-end Equihash.Verifier.Blake2b
 
 namespace Equihash.Verifier
 
@@ -85,12 +27,14 @@ structure Node where
 
 /-- `initialise_state` (lines 136–145; 0.3.0: 119–128; 0.3.1: 129–138): BLAKE2b with a
     `digest_len`-byte output, personalized by `"ZcashPoW" ‖ n ‖ k`. `write_all` on a `Vec`
-    appends and never fails. -/
-def initialiseState? (n k digestLen : ℕ) : Option Blake2b.State := do
+    appends and never fails. `Params::new` runs `Implementation::detect`; `impl` is the
+    implementation it picks. -/
+def initialiseState? (impl : Blake2b.Implementation) (n k digestLen : ℕ) :
+    Option Blake2b.State := do
   let mut personalization := BLAKE2B_PERSONALIZATION_PREFIX
   personalization := personalization ++ u32ToLeBytes n
   personalization := personalization ++ u32ToLeBytes k
-  let params ← Blake2b.Params.new.hashLength? digestLen
+  let params ← (Blake2b.Params.new impl).hashLength? digestLen
   let params ← params.personal? personalization
   return params.toState
 
@@ -180,9 +124,9 @@ termination_by indices.length
 decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
 
 /-- `is_valid_solution_recursive` (lines 244–262). -/
-def isValidSolutionRecursive? (p : Params) (input nonce : List ℕ) (indices : List ℕ) :
-    ExceptT Kind Option Unit := do
-  let mut state ← initialiseState? p.n p.k p.hashOutput
+def isValidSolutionRecursive? (impl : Blake2b.Implementation) (p : Params) (input nonce : List ℕ)
+    (indices : List ℕ) : ExceptT Kind Option Unit := do
+  let mut state ← initialiseState? impl p.n p.k p.hashOutput
   state := state.update input
   state := state.update nonce
   let root ← treeValidator? p state indices

@@ -19,7 +19,7 @@ def nonce (b : List ℕ) : List ℕ := b ++ List.replicate (32 - b.length) 0
     bytes are the BLAKE2b hash of the block index, after `input` and `nonce`. -/
 def referenceHash (p : Params) (input nonce : List ℕ) :
     List ℕ → List (List ℕ) → Option (List (List ℕ)) := fun blocks digests => do
-  let mut state ← initialiseState? p.n p.k p.hashOutput
+  let mut state ← initialiseState? .portable p.n p.k p.hashOutput
   state := state.update input
   state := state.update nonce
   return (blocks.zip digests).map fun (block, digest) =>
@@ -29,7 +29,7 @@ def referenceHash (p : Params) (input nonce : List ℕ) :
 /-- Both verifiers' result, error kind included, when they agree; `none` when they do not. -/
 def bothVerifiers (p : Params) (input nonce indices : List ℕ) :
     Option (Option (Except Kind Unit)) :=
-  let recursive := (isValidSolutionRecursive? p input nonce indices).run
+  let recursive := (isValidSolutionRecursive? .portable p input nonce indices).run
   if recursive = (validateTree? p indices (referenceHash p input nonce)).run then some recursive
   else none
 
