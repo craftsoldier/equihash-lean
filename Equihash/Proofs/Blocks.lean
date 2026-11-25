@@ -24,19 +24,10 @@ variable (H : HashFn) (p : Params) (S : List Byte)
 theorem one_le_m : 1 ≤ p.m := (Nat.one_le_div_iff p.n_pos).mpr p.n_le
 
 /-- `BLAKE2b-(n·m)` outputs at least one byte. -/
-theorem genHashParams_len_pos : 1 ≤ (genHashParams p).len := by
-  have h1 := one_le_m p
-  have h2 : p.n ≤ p.n * p.m := Nat.le_mul_of_pos_right _ h1
-  obtain ⟨c, hc⟩ := p.bytes_dvd
-  have := p.n_pos
-  simp only [genHashParams, Params.m] at *
-  omega
+theorem genHashParams_len_pos : 1 ≤ (genHashParams p).len := (genHashParams p).len_pos
 
 /-- `BLAKE2b-(n·m)` outputs at most 64 bytes, the most BLAKE2b can. -/
-theorem genHashParams_len_le : (genHashParams p).len ≤ 64 := by
-  have h : p.n * (512 / p.n) ≤ 512 := by rw [Nat.mul_comm]; exact Nat.div_mul_le_self 512 p.n
-  simp only [genHashParams, Params.m]
-  omega
+theorem genHashParams_len_le : (genHashParams p).len ≤ 64 := (genHashParams p).len_le
 
 /-- The hash value the Lean model of the verifiers computes for 0-based index `j`: §5.4.1.11's
     `T_{h+1 .. h+n}`, with `powcount`'s `g` reduced mod `2^32` as the model's `u32ToLeBytes`

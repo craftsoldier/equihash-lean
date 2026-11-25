@@ -5,6 +5,7 @@ Leaves: a node for one index holds §5.4.1.11's hash value for it. What `initial
 module
 
 public import Equihash.Verifier.Recursive
+public import Equihash.Proofs.Blake2bSimdAvx2
 public import Equihash.Proofs.Params
 public import Equihash.Proofs.Minimal
 public import Equihash.Proofs.Digits
@@ -51,18 +52,19 @@ theorem bytes_toNat (l : List Byte) : Bytes (l.map BitVec.toNat) := by
 /-! ## Hashing -/
 
 /-- A BLAKE2b state for §5.4.1.11's `BLAKE2b-(n·m)`, personalized by `powtag`, that has
-    absorbed the bytes `S`. -/
+    absorbed the bytes `S`, fewer than `2^64` of them, as two Rust slices are. -/
 def StateFor (p : Spec.Params) (S : List Byte) (st : Blake2b.State) : Prop :=
-  st.params.hashLength = (genHashParams p).len ∧
-  st.params.personal = (powtag p).map BitVec.toNat ∧
-  bytesOf st.input = S ∧ Bytes st.input
+  ∃ x, Blake2b.Absorbed (genHashParams p).len ((powtag p).map BitVec.toNat) x st ∧
+    bytesOf x = S ∧ Bytes x ∧ x.length < 2 ^ 64
 
 /-- `update` absorbs more bytes. -/
 theorem StateFor.update {p : Spec.Params} {S : List Byte} {st : Blake2b.State}
-    (h : StateFor p S st) (x : List ℕ) (hx : Bytes x) :
+    (h : StateFor p S st) (x : List ℕ) (hx : Bytes x) (hlen : S.length + x.length < 2 ^ 64) :
     StateFor p (S ++ bytesOf x) (st.update x) := by
-  obtain ⟨hl, hp, hS, hb⟩ := h
-  exact ⟨hl, hp, by simp [Blake2b.State.update, ← hS], hb.append hx⟩
+  obtain ⟨z, hz, hS, hb, hzl⟩ := h
+  have hzS : z.length = S.length := by rw [← hS]; simp
+  refine ⟨z ++ x, (hz.update (Blake2b.compressOk _) x (by omega)).1, by simp [hS], hb.append hx,
+    by simp; omega⟩
 
 /-- `generate_hash(state, g)`: §5.4.1.11's `T`, the hash of everything absorbed followed by
     `powcount(g mod 2^32)`, the low 32 bits the model's `u32ToLeBytes` keeps. -/
@@ -71,17 +73,21 @@ theorem generateHash_eq {p : Spec.Params} {S : List Byte} {st : Blake2b.State}
     generateHash st g = (Blake2b.hashFn (genHashParams p)
       (S ++ powcount ⟨g % 2 ^ 32, Nat.mod_lt _ (Nat.two_pow_pos _)⟩)).toList.map
       BitVec.toNat := by
-  obtain ⟨hl, hp, hS, hb⟩ := h
-  simp only [generateHash, Blake2b.State.update, Blake2b.State.finalize, Blake2b.hashFn,
-    List.Vector.toList_mk]
-  rw [map_toNat_bytesOf (bytes_blake2b _ _ _), hl, hp, ← hS, powcount, ← u32ToLeBytes_eq,
+  obtain ⟨z, hz, hS, hb, hzl⟩ := h
+  have hup := hz.update (Blake2b.compressOk _) (u32ToLeBytes g) (by simp [u32ToLeBytes]; omega)
+  have hfin := hup.1.finalize (Blake2b.compressOk _) (genHashParams_len_le p)
+    (by simp [u32ToLeBytes]; omega)
+  simp only [generateHash, hfin, Blake2b.hashFn, List.Vector.toList_mk]
+  rw [map_toNat_bytesOf (bytes_blake2b _ _ _), ← hS, powcount, ← u32ToLeBytes_eq,
     u32ToLeBytes_mod, ← List.map_append, map_toNat_bytesOf (hb.append (bytes_u32ToLeBytes g))]
   rfl
 
 /-- `initialise_state(n, k, n·m/8)`: a BLAKE2b state for §5.4.1.11's `BLAKE2b-(n·m)`,
-    personalized by `powtag`, that has absorbed nothing. -/
-theorem initialiseState?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
-    ∃ st, initialiseState? rp.n rp.k rp.hashOutput = some st ∧ StateFor p.toParams [] st := by
+    personalized by `powtag`, that has absorbed nothing, whichever implementation `impl`
+    `blake2b_simd` picks. -/
+theorem initialiseState?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p)
+    (impl : Blake2b.Implementation) :
+    ∃ st, initialiseState? impl rp.n rp.k rp.hashOutput = some st ∧ StateFor p.toParams [] st := by
   have hlen := genHashParams_len_pos p.toParams
   have hlen' := genHashParams_len_le p.toParams
   have hpow : (powtag p.toParams).map BitVec.toNat =
@@ -90,13 +96,15 @@ theorem initialiseState?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
       (bytes_u32ToLeBytes _)]
     rfl
   simp only [genHashParams] at hlen hlen'
-  refine ⟨⟨⟨p.n * p.m / 8, (powtag p.toParams).map BitVec.toNat⟩, []⟩, ?_,
-    rfl, rfl, rfl, fun b hb => by simp at hb⟩
-  rw [hpow]
+  set params : Blake2b.Params :=
+    ⟨p.n * p.m / 8, (powtag p.toParams).map BitVec.toNat, impl⟩ with hparams
+  refine ⟨params.toState, ?_, [], params.toState_absorbed, rfl, fun b hb => by simp at hb,
+    by simp⟩
+  rw [hpow] at hparams
   simp [initialiseState?, Blake2b.Params.new, Blake2b.Params.hashLength?,
     Blake2b.Params.personal?, Params.hashOutput_eq h, h.1, h.2, Blake2b.outBytes,
     Blake2b.personalBytes, BLAKE2B_PERSONALIZATION_PREFIX, u32ToLeBytes, hlen,
-    show p.n * p.m / 8 ≤ 64 from hlen', Blake2b.Params.toState]
+    show p.n * p.m / 8 ≤ 64 from hlen', hparams]
 
 /-! ## Leaves -/
 

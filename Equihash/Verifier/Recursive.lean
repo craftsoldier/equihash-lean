@@ -9,7 +9,7 @@ A Rust panic is `none`; a function returning a Rust `Result` is into `ExceptT Ki
 -/
 module
 
-public import Equihash.Verifier.Blake2b
+public import Equihash.Verifier.Blake2bSimd
 public import Equihash.Verifier.Error
 public import Equihash.Verifier.Lib
 public import Equihash.Verifier.Minimal
@@ -27,12 +27,14 @@ structure Node where
 
 /-- `initialise_state` (lines 136–145; 0.3.0: 119–128; 0.3.1: 129–138): BLAKE2b with a
     `digest_len`-byte output, personalized by `"ZcashPoW" ‖ n ‖ k`. `write_all` on a `Vec`
-    appends and never fails. -/
-def initialiseState? (n k digestLen : ℕ) : Option Blake2b.State := do
+    appends and never fails. `Params::new` runs `Implementation::detect`; `impl` is the
+    implementation it picks. -/
+def initialiseState? (impl : Blake2b.Implementation) (n k digestLen : ℕ) :
+    Option Blake2b.State := do
   let mut personalization := BLAKE2B_PERSONALIZATION_PREFIX
   personalization := personalization ++ u32ToLeBytes n
   personalization := personalization ++ u32ToLeBytes k
-  let params ← Blake2b.Params.new.hashLength? digestLen
+  let params ← (Blake2b.Params.new impl).hashLength? digestLen
   let params ← params.personal? personalization
   return params.toState
 
@@ -122,9 +124,9 @@ termination_by indices.length
 decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
 
 /-- `is_valid_solution_recursive` (lines 244–262). -/
-def isValidSolutionRecursive? (p : Params) (input nonce : List ℕ) (indices : List ℕ) :
-    ExceptT Kind Option Unit := do
-  let mut state ← initialiseState? p.n p.k p.hashOutput
+def isValidSolutionRecursive? (impl : Blake2b.Implementation) (p : Params) (input nonce : List ℕ)
+    (indices : List ℕ) : ExceptT Kind Option Unit := do
+  let mut state ← initialiseState? impl p.n p.k p.hashOutput
   state := state.update input
   state := state.update nonce
   let root ← treeValidator? p state indices

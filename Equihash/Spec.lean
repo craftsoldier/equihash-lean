@@ -20,10 +20,14 @@ namespace Equihash
 abbrev Byte := BitVec 8
 
 /-- The parameters of `BLAKE2b-ℓ(p, x)` (§5.4.1.2): the output length in bytes, `ℓ / 8`,
-    and the personalization `p`. -/
+    and the 16-byte personalization `p`.
+
+    **Not stated in the specification.** The output is 1 to 64 bytes (ANWW2013, §2.8). -/
 structure HashParams where
   len : ℕ
-  personal : List Byte
+  len_pos : 0 < len
+  len_le : len ≤ 64
+  personal : List.Vector Byte 16
 
 /-- `BLAKE2b-ℓ(p, x)`: `ℓ / 8` output bytes for any input bytes `x`. -/
 abbrev HashFn := (p : HashParams) → List Byte → List.Vector Byte p.len
@@ -104,7 +108,13 @@ def powcount (g : Fin (2 ^ 32)) : List Byte := I2LEOSP 32 g
 /-- `BLAKE2b-(n·m)` personalized by `powtag`: `n·m / 8` output bytes. -/
 def genHashParams (p : Params) : HashParams where
   len := p.n * p.m / 8
-  personal := powtag p
+  len_pos := by
+    have : p.n ≤ p.n * p.m := Nat.le_mul_of_pos_right _ (Nat.div_pos p.n_le p.n_pos)
+    have := p.bytes_dvd; have := p.n_pos; simp only [Params.m] at *; omega
+  len_le := by
+    have : p.n * (512 / p.n) ≤ 512 := by rw [Nat.mul_comm]; exact Nat.div_mul_le_self 512 p.n
+    simp only [Params.m]; omega
+  personal := ⟨powtag p, by simp [powtag, zcashPoW, I2LEOSP]⟩
 
 /-- > Let `EquihashGen_{n,k}(S, i) := T_{h+1 .. h+n}`, where
     > * `m = ⌊512/n⌋`;

@@ -3,7 +3,8 @@ Each release's `is_valid_solution` on the two real blocks of `Tests/Spec.lean`, 
 the crate's own tests of it (`src/verify.rs`), with the error the crate expects: first
 `zakura-equihash 5.4.0`, then `equihash 0.3.0`, then `equihash 0.3.1`. The blocks are verified
 under every leaf-hashing kernel, and the kernels are compared with `blake2b_simd` as the crate
-compares them; the rest runs the portable kernel.
+compares them; the rest runs the portable kernel. `blake2b_simd` runs its AVX2 implementation
+here, and its portable one in `Tests/Verifier.lean`.
 -/
 import Equihash.Tests.Verifier
 
@@ -113,17 +114,17 @@ def kernels : List Kernel := [.portable, .avx2, .neon, .neonSha3]
 
 -- The mainnet and Regtest blocks: valid, also with the whole prefix as `input`; any one bit of
 -- the Regtest solution or nonce flipped is rejected.
-#guard (isValidSolution_equihash_0_3_0? 200 9 blockHeader blockNonce solution).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 200 9 blockHeader blockNonce solution).run =
   some (.ok ())
-#guard (isValidSolution_equihash_0_3_0? 200 9 (blockHeader ++ blockNonce) [] solution).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 200 9 (blockHeader ++ blockNonce) [] solution).run =
   some (.ok ())
-#guard (isValidSolution_equihash_0_3_0? 48 5 regtestHeader regtestNonce regtestSolution).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 48 5 regtestHeader regtestNonce regtestSolution).run =
   some (.ok ())
 #guard (List.range (regtestSolution.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_0? 48 5 regtestHeader regtestNonce
+  isErr (isValidSolution_equihash_0_3_0? .avx2 48 5 regtestHeader regtestNonce
     (regtestSolution.set (i / 8) (regtestSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
 #guard (List.range (regtestNonce.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_0? 48 5 regtestHeader
+  isErr (isValidSolution_equihash_0_3_0? .avx2 48 5 regtestHeader
     (regtestNonce.set (i / 8) (regtestNonce[i / 8]! ^^^ 1 <<< (i % 8))) regtestSolution).run
 
 /-- The input of 0.3.0's `all_bits_matter` (`src/verify.rs`, lines 291–317): 72 bytes. -/
@@ -140,18 +141,18 @@ def allBitsSolution : List ℕ := [
 
 -- `all_bits_matter`: valid with a 72-byte input, which Zakura rejects as a length it does not
 -- support; any one bit of the solution flipped is rejected.
-#guard (isValidSolution_equihash_0_3_0? 96 5 allBitsInput (nonce [1]) allBitsSolution).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 96 5 allBitsInput (nonce [1]) allBitsSolution).run =
   some (.ok ())
 #guard (isValidSolution? .portable 96 5 allBitsInput (nonce [1]) allBitsSolution).run =
   some (.error .UnsupportedInputLength)
 #guard (List.range (allBitsSolution.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_0? 96 5 allBitsInput (nonce [1])
+  isErr (isValidSolution_equihash_0_3_0? .avx2 96 5 allBitsInput (nonce [1])
     (allBitsSolution.set (i / 8) (allBitsSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
 
 -- Lengths that overflow (`isValidSolution_equihash_0_3_0?_448_63` and `_520_64`): 0.3.0 panics
 -- where Zakura returns `InvalidParams`.
-#guard (isValidSolution_equihash_0_3_0? 448 63 blockHeader blockNonce []).run = none
-#guard (isValidSolution_equihash_0_3_0? 520 64 blockHeader blockNonce [0]).run = none
+#guard (isValidSolution_equihash_0_3_0? .avx2 448 63 blockHeader blockNonce []).run = none
+#guard (isValidSolution_equihash_0_3_0? .avx2 520 64 blockHeader blockNonce [0]).run = none
 #guard (isValidSolution? .portable 448 63 blockHeader blockNonce []).run =
   some (.error .InvalidParams)
 #guard (isValidSolution? .portable 520 64 blockHeader blockNonce [0]).run =
@@ -160,9 +161,11 @@ def allBitsSolution : List ℕ := [
 -- Parameters 0.3.0's `Params::new` accepts and Zakura's rejects: unusual collision widths panic
 -- on a solution of the length they expect (`(48, 7)`: 112 bytes; `(104, 3)`: 27 bytes).
 #guard (Params.newUnbounded? 48 7).isSome && (Params.new? 48 7).isNone
-#guard (isValidSolution_equihash_0_3_0? 48 7 blockHeader blockNonce (List.replicate 112 0)).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 48 7 blockHeader blockNonce
+    (List.replicate 112 0)).run =
   none
-#guard (isValidSolution_equihash_0_3_0? 104 3 blockHeader blockNonce (List.replicate 27 0)).run =
+#guard (isValidSolution_equihash_0_3_0? .avx2 104 3 blockHeader blockNonce
+    (List.replicate 27 0)).run =
   none
 
 /-! ## `equihash 0.3.1` -/
@@ -173,35 +176,36 @@ def allBitsSolution : List ℕ := [
 -- valid, under every kernel, also with the whole prefix as `input`; any one bit of either
 -- solution flipped is rejected.
 #guard kernels.all fun kernel =>
-  (isValidSolution_equihash_0_3_1? kernel 200 9 blockHeader blockNonce solution).run ==
+  (isValidSolution_equihash_0_3_1? kernel .avx2 200 9 blockHeader blockNonce solution).run ==
     some (.ok ())
-#guard (isValidSolution_equihash_0_3_1? .portable 200 9 (blockHeader ++ blockNonce) []
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 200 9 (blockHeader ++ blockNonce) []
   solution).run = some (.ok ())
 #guard (List.range (solution.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_1? .portable 200 9 blockHeader blockNonce
+  isErr (isValidSolution_equihash_0_3_1? .portable .avx2 200 9 blockHeader blockNonce
     (solution.set (i / 8) (solution[i / 8]! ^^^ 1 <<< (i % 8)))).run
 #guard kernels.all fun kernel =>
-  (isValidSolution_equihash_0_3_1? kernel 48 5 regtestHeader regtestNonce regtestSolution).run ==
+  (isValidSolution_equihash_0_3_1? kernel .avx2 48 5 regtestHeader regtestNonce
+    regtestSolution).run ==
     some (.ok ())
-#guard (isValidSolution_equihash_0_3_1? .portable 48 5 (regtestHeader ++ regtestNonce) []
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 48 5 (regtestHeader ++ regtestNonce) []
   regtestSolution).run = some (.ok ())
 #guard (List.range (regtestSolution.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_1? .portable 48 5 regtestHeader regtestNonce
+  isErr (isValidSolution_equihash_0_3_1? .portable .avx2 48 5 regtestHeader regtestNonce
     (regtestSolution.set (i / 8) (regtestSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
 
 -- `all_bits_matter` (lines 365–391): valid with a 72-byte input, hashed with `blake2b_simd`, as
 -- the leaf hasher takes only 140-byte prefixes; any one bit of the solution flipped is rejected.
-#guard (isValidSolution_equihash_0_3_1? .portable 96 5 allBitsInput (nonce [1])
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 96 5 allBitsInput (nonce [1])
   allBitsSolution).run = some (.ok ())
 #guard (List.range (allBitsSolution.length * 8)).all fun i =>
-  isErr (isValidSolution_equihash_0_3_1? .portable 96 5 allBitsInput (nonce [1])
+  isErr (isValidSolution_equihash_0_3_1? .portable .avx2 96 5 allBitsInput (nonce [1])
     (allBitsSolution.set (i / 8) (allBitsSolution[i / 8]! ^^^ 1 <<< (i % 8)))).run
 
 -- The `blake2b_simd` path on the mainnet block: a prefix one byte short or long is not a length
 -- the verifier refuses, as Zakura does, but one its solution fails for.
-#guard (isValidSolution_equihash_0_3_1? .portable 200 9 (blockHeader.take 107) blockNonce
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 200 9 (blockHeader.take 107) blockNonce
   solution).run = some (.error .Collision)
-#guard (isValidSolution_equihash_0_3_1? .portable 200 9 (blockHeader ++ [0]) blockNonce
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 200 9 (blockHeader ++ [0]) blockNonce
   solution).run = some (.error .Collision)
 
 -- `solution_length_overflow_is_rejected` (`src/minimal.rs`, lines 170–175): `(512, 63)`, whose
@@ -209,18 +213,18 @@ def allBitsSolution : List ℕ := [
 #guard (Params.newUnbounded? 512 63).isSome
 #guard Params.solutionBytes? ⟨512, 63⟩ = none
 #guard [[], [0]].all fun soln => indicesFromMinimal? ⟨512, 63⟩ soln == some none
-#guard (isValidSolution_equihash_0_3_1? .portable 512 63 blockHeader blockNonce []).run =
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 512 63 blockHeader blockNonce []).run =
   some (.error .InvalidParams)
 
 -- The lengths 0.3.0 wraps (`isValidSolution_equihash_0_3_1?_448_63` and `_520_64`): rejected.
-#guard (isValidSolution_equihash_0_3_1? .portable 448 63 blockHeader blockNonce []).run =
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 448 63 blockHeader blockNonce []).run =
   some (.error .InvalidParams)
-#guard (isValidSolution_equihash_0_3_1? .portable 520 64 blockHeader blockNonce [0]).run =
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 520 64 blockHeader blockNonce [0]).run =
   some (.error .InvalidParams)
 
 -- Parameters `Params::new` accepts and Zakura's rejects still panic on a solution of the length
 -- they expect, as in 0.3.0.
-#guard (isValidSolution_equihash_0_3_1? .portable 48 7 blockHeader blockNonce
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 48 7 blockHeader blockNonce
   (List.replicate 112 0)).run = none
-#guard (isValidSolution_equihash_0_3_1? .portable 104 3 blockHeader blockNonce
+#guard (isValidSolution_equihash_0_3_1? .portable .avx2 104 3 blockHeader blockNonce
   (List.replicate 27 0)).run = none

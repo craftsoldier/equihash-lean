@@ -1,7 +1,8 @@
 /-
 Each release's `is_valid_solution` is correct: it returns `Ok(())` exactly for the solution bytes
 that encode a §7.7.1-valid solution; `zakura-equihash 5.4.0` on a 140-byte `input ‖ nonce`,
-`equihash 0.3.0` and `0.3.1` on one of any length, each under every leaf-hashing kernel. And
+`equihash 0.3.0` and `0.3.1` on one under `2^64` bytes, each under every leaf-hashing kernel and
+either `blake2b_simd` implementation. And
 `equihash 0.3.0`'s length check wraps where Zakura's checks for overflow, so that for `(448, 63)`
 and `(520, 64)` it accepts a solution of the wrong length, and the verifier then panics; `0.3.1`
 rejects every solution for them.
@@ -198,13 +199,18 @@ theorem personalOf_eq {rp : Params} {p : ZakuraParams} (h : rp.Is p) :
 /-- The hash of block index `b`, from a state that absorbed `input` then `nonce`, is BLAKE2b of
     `input ‖ nonce ‖ b`, as the leaf hasher computes it. -/
 theorem generateHash_blake2b {rp : Params} {p : ZakuraParams} (h : rp.Is p) {st₀ : Blake2b.State}
-    (hst : StateFor p.toParams [] st₀) (input nonce : List ℕ) (b : ℕ) :
+    (hst : StateFor p.toParams [] st₀) (input nonce : List ℕ)
+    (hsz : input.length + nonce.length < 2 ^ 64) (b : ℕ) :
     generateHash ((st₀.update input).update nonce) b =
       Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) := by
-  obtain ⟨hl, hp, hS, -⟩ := hst
-  have h0 : st₀.input = [] := by simpa [bytesOf] using hS
-  simp only [generateHash, Blake2b.State.update, Blake2b.State.finalize, hl, hp, h0,
-    personalOf_eq h, genHashParams, ← Params.hashOutput_eq h, List.nil_append]
+  obtain ⟨z, hz, hS, -, -⟩ := hst
+  obtain rfl : z = [] := by simpa [bytesOf] using hS
+  have h1 := hz.update (Blake2b.compressOk _) input (by simp; omega)
+  have h2 := h1.1.update (Blake2b.compressOk _) nonce (by simp; omega)
+  have h3 := h2.1.update (Blake2b.compressOk _) (u32ToLeBytes b) (by simp [u32ToLeBytes]; omega)
+  rw [generateHash, h3.1.finalize (Blake2b.compressOk _) (genHashParams_len_le p.toParams)
+    (by simp [u32ToLeBytes]; omega)]
+  simp only [List.nil_append, personalOf_eq h, genHashParams, ← Params.hashOutput_eq h]
 
 /-! ## `is_valid_solution` -/
 
@@ -227,7 +233,8 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     (isValidSolution? kernel n k input nonce soln).run = some (.ok ()) ↔
       ∃ p : ZakuraParams, p.n = n ∧ p.k = k ∧ 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
         ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-          ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+          ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   unfold isValidSolution?
   rcases hnew : Params.new? n k with _ | rp
   · -- Parameters `Params::new` rejects.
@@ -286,15 +293,17 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     exact digitVal_lt _ _ _
   -- The leaf hasher, and the state it agrees with.
   obtain ⟨lh, hlh, hhash⟩ := leafHasher_spec h input nonce hin hnon hlen kernel
-  obtain ⟨st₀, -, hst₀⟩ := initialiseState?_spec h
+  obtain ⟨st₀, -, hst₀⟩ := initialiseState?_spec h .portable
+  have hsz : input.length + nonce.length < 2 ^ 64 := by omega
   have hst : StateFor p.toParams (bytesOf (input ++ nonce)) ((st₀.update input).update nonce) := by
-    simpa [List.map_append] using (hst₀.update input hin).update nonce hnon
+    simpa [List.map_append] using
+      (hst₀.update input hin (by simp; omega)).update nonce hnon (by simp; omega)
   rw [hlh]
   simp only [monadLift_some, pure_bind]
   rw [(validateTree?_iff h hst (D := fun b =>
       Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
         List.replicate (64 - rp.hashOutput) 0)
-    (fun b => by rw [generateHash_blake2b h hst₀])
+    (fun b => by rw [generateHash_blake2b h hst₀ _ _ hsz])
     (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
     (good_iff_validSolution _ _ _ _ hL hbound)]
   exact decoded_iff p soln _ hBL
@@ -304,23 +313,25 @@ theorem isValidSolution?_correct (kernel : Kernel) (n k : ℕ) (input nonce soln
     `is_valid_solution_recursive` does. -/
 theorem validateTree?_iff_recursive {rp : Params} {p : ZakuraParams} (h : rp.Is p)
     (input nonce : List ℕ) (hin : Bytes input) (hnon : Bytes nonce)
-    (hlen : input.length + nonce.length = 140) (kernel : Kernel) {lh : LeafHasher}
-    (hlh : LeafHasher.new? rp input nonce kernel = some (some lh)) (L : List ℕ)
+    (hlen : input.length + nonce.length = 140) (kernel : Kernel) (impl : Blake2b.Implementation)
+    {lh : LeafHasher} (hlh : LeafHasher.new? rp input nonce kernel = some (some lh)) (L : List ℕ)
     (hL : L.length = 2 ^ p.k) :
     (validateTree? rp L (fun blocks digests => lh.hash? blocks digests)).run = some (.ok ()) ↔
-      (isValidSolutionRecursive? rp input nonce L).run = some (.ok ()) := by
+      (isValidSolutionRecursive? impl rp input nonce L).run = some (.ok ()) := by
   obtain ⟨lh', hlh', hhash⟩ := leafHasher_spec h input nonce hin hnon hlen kernel
   rw [hlh, Option.some.injEq, Option.some.injEq] at hlh'
   subst hlh'
-  obtain ⟨st₀, -, hst₀⟩ := initialiseState?_spec h
+  obtain ⟨st₀, -, hst₀⟩ := initialiseState?_spec h impl
+  have hsz : input.length + nonce.length < 2 ^ 64 := by omega
   have hst : StateFor p.toParams (bytesOf (input ++ nonce)) ((st₀.update input).update nonce) := by
-    simpa [List.map_append] using (hst₀.update input hin).update nonce hnon
+    simpa [List.map_append] using
+      (hst₀.update input hin (by simp; omega)).update nonce hnon (by simp; omega)
   exact (validateTree?_iff h hst (D := fun b =>
       Blake2b.blake2b rp.hashOutput (personalOf rp) (input ++ nonce ++ u32ToLeBytes b) ++
         List.replicate (64 - rp.hashOutput) 0)
-    (fun b => by rw [generateHash_blake2b h hst₀])
+    (fun b => by rw [generateHash_blake2b h hst₀ _ _ hsz])
     (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
-    (isValidSolutionRecursive?_iff h input nonce L hin hnon hL).symm
+    (isValidSolutionRecursive?_iff impl h input nonce L hin hnon hsz hL).symm
 
 /-! ## Zcash's parameters -/
 
@@ -340,7 +351,7 @@ theorem isValidSolution?_zcash (kernel : Kernel) (input nonce soln : List ℕ) (
     (hnon : Bytes nonce) (hsoln : Bytes soln) (hlen : input.length + nonce.length = 140) :
     (isValidSolution? kernel 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
   rw [isValidSolution?_correct kernel 200 9 input nonce soln hin hnon hsoln hlen]
   exact ⟨fun ⟨p, hn, hk, _, hrest⟩ => ZakuraParams.ext' (p := p) (q := zcashParams) hn hk ▸ hrest,
     fun hrest => ⟨zcashParams, rfl, rfl, by decide, hrest⟩⟩
@@ -351,7 +362,7 @@ theorem isValidSolution?_regtest (kernel : Kernel) (input nonce soln : List ℕ)
     (hlen : input.length + nonce.length = 140) :
     (isValidSolution? kernel 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
   rw [isValidSolution?_correct kernel 48 5 input nonce soln hin hnon hsoln hlen]
   exact ⟨fun ⟨p, hn, hk, _, hrest⟩ =>
       ZakuraParams.ext' (p := p) (q := regtestParams) hn hk ▸ hrest,
@@ -385,9 +396,10 @@ termination_by indices.length
 decreasing_by all_goals simp only [List.length_take, List.length_drop]; omega
 
 /-- 0.3.0's `is_valid_solution_recursive` computes what Zakura's does. -/
-theorem isValidSolutionRecursive_equihash_0_3_0?_eq (p : Params) (input nonce indices : List ℕ) :
-    isValidSolutionRecursive_equihash_0_3_0? p input nonce indices =
-      isValidSolutionRecursive? p input nonce indices := by
+theorem isValidSolutionRecursive_equihash_0_3_0?_eq (impl : Blake2b.Implementation) (p : Params)
+    (input nonce indices : List ℕ) :
+    isValidSolutionRecursive_equihash_0_3_0? impl p input nonce indices =
+      isValidSolutionRecursive? impl p input nonce indices := by
   simp only [isValidSolutionRecursive_equihash_0_3_0?, isValidSolutionRecursive?,
     treeValidator_equihash_0_3_0?_eq]
 
@@ -429,15 +441,17 @@ theorem Params.newUnbounded?_zakura (p : ZakuraParams) :
   simp only [Params.newUnbounded?, hc, and_self, ↓reduceIte]
 
 /-- **`equihash 0.3.0`'s `is_valid_solution` is correct**, for parameters Zakura accepts whose
-    solutions are under `2^62` bits long, and an `input ‖ nonce` of any length: it returns
-    `Ok(())` exactly for the solution bytes that encode a solution valid by §7.7.1, for
-    `powheader = input ‖ nonce` under BLAKE2b. -/
-theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce soln : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
-    (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) :
-    (isValidSolution_equihash_0_3_0? p.n p.k input nonce soln).run = some (.ok ()) ↔
+    solutions are under `2^62` bits long, either `blake2b_simd` implementation, and an
+    `input ‖ nonce` under `2^64` bytes, as two Rust slices are: it returns `Ok(())` exactly for
+    the solution bytes that encode a solution valid by §7.7.1, for `powheader = input ‖ nonce`
+    under BLAKE2b. -/
+theorem isValidSolution_equihash_0_3_0?_correct (impl : Blake2b.Implementation) (p : ZakuraParams)
+    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
+    (hsz : input.length + nonce.length < 2 ^ 64) (hfit : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 62) :
+    (isValidSolution_equihash_0_3_0? impl p.n p.k input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
   have hov : 2 ^ p.k * (p.digitBits + 1) < 2 ^ 64 := by omega
   unfold isValidSolution_equihash_0_3_0?
@@ -466,37 +480,41 @@ theorem isValidSolution_equihash_0_3_0?_correct (p : ZakuraParams) (input nonce 
   simp only [hl, ↓reduceIte]
   have hL : ((List.range (2 ^ p.k)).map
       (digitVal (p.digitBits + 1) (bitsOfBytes (bytesOf soln)))).length = 2 ^ p.k := by simp
-  rw [isValidSolutionRecursive?_correct h input nonce _ hin hnon hL (fun j hj => by
+  rw [isValidSolutionRecursive?_correct impl h input nonce _ hin hnon hsz hL (fun j hj => by
     obtain ⟨t, -, rfl⟩ := List.mem_map.mp hj
-    exact digitVal_lt _ _ _)]
+    exact digitVal_lt _ _ _), ← Blake2b.hashFn_eq]
   exact decoded_iff p soln _ (by rw [hBl, hl, hr])
 
 /-- **`equihash 0.3.0`'s `is_valid_solution(200, 9, …)`** returns `Ok(())` exactly for the
-    1344-byte encodings of §7.7.1-valid solutions, for any input. -/
-theorem isValidSolution_equihash_0_3_0?_zcash (input nonce soln : List ℕ) (hin : Bytes input)
-    (hnon : Bytes nonce) (hsoln : Bytes soln) :
-    (isValidSolution_equihash_0_3_0? 200 9 input nonce soln).run = some (.ok ()) ↔
+    1344-byte encodings of §7.7.1-valid solutions, for any input under `2^64` bytes. -/
+theorem isValidSolution_equihash_0_3_0?_zcash (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
+    (hsz : input.length + nonce.length < 2 ^ 64) :
+    (isValidSolution_equihash_0_3_0? impl 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i :=
-  isValidSolution_equihash_0_3_0?_correct zcashParams input nonce soln hin hnon hsoln (by decide)
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i :=
+  isValidSolution_equihash_0_3_0?_correct impl zcashParams input nonce soln hin hnon hsoln hsz
+    (by decide)
 
 /-- **`equihash 0.3.0`'s `is_valid_solution(48, 5, …)`**, likewise. -/
-theorem isValidSolution_equihash_0_3_0?_regtest (input nonce soln : List ℕ) (hin : Bytes input)
-    (hnon : Bytes nonce) (hsoln : Bytes soln) :
-    (isValidSolution_equihash_0_3_0? 48 5 input nonce soln).run = some (.ok ()) ↔
+theorem isValidSolution_equihash_0_3_0?_regtest (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
+    (hsz : input.length + nonce.length < 2 ^ 64) :
+    (isValidSolution_equihash_0_3_0? impl 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i :=
-  isValidSolution_equihash_0_3_0?_correct regtestParams input nonce soln hin hnon hsoln
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i :=
+  isValidSolution_equihash_0_3_0?_correct impl regtestParams input nonce soln hin hnon hsoln hsz
     (by decide)
 
 /-- **`equihash 0.3.0` checks the solution length with wrapping arithmetic.** Its `Params::new`
     accepts `(448, 63)`, whose solutions have `2^63` eight-bit indices, `2^63` bytes. The length
     check computes `2^63 · 8 mod 2^64 / 8 = 0` and accepts the empty solution, which decodes to
     no indices, and the verifier then panics: `tree_validator` reads the first of none. -/
-theorem isValidSolution_equihash_0_3_0?_448_63 (input nonce : List ℕ) :
+theorem isValidSolution_equihash_0_3_0?_448_63 (impl : Blake2b.Implementation)
+    (input nonce : List ℕ) :
     Params.newUnbounded? 448 63 = some ⟨448, 63⟩ ∧
       indicesFromMinimalWrapping? ⟨448, 63⟩ [] = some (some []) ∧
-      (isValidSolution_equihash_0_3_0? 448 63 input nonce []).run = none := by
+      (isValidSolution_equihash_0_3_0? impl 448 63 input nonce []).run = none := by
   have hp : Params.newUnbounded? 448 63 = some ⟨448, 63⟩ := rfl
   have hd : indicesFromMinimalWrapping? ⟨448, 63⟩ [] = some (some []) := by
     rw [indicesFromMinimalWrapping?_eq]
@@ -515,7 +533,7 @@ theorem isValidSolution_equihash_0_3_0?_448_63 (input nonce : List ℕ) :
   rw [hd]
   simp only [monadLift_some, pure_bind]
   unfold isValidSolutionRecursive_equihash_0_3_0?
-  obtain ⟨st, hst⟩ : ∃ st, initialiseState? (⟨448, 63⟩ : Params).n (⟨448, 63⟩ : Params).k
+  obtain ⟨st, hst⟩ : ∃ st, initialiseState? impl (⟨448, 63⟩ : Params).n (⟨448, 63⟩ : Params).k
       (⟨448, 63⟩ : Params).hashOutput = some st := ⟨_, rfl⟩
   rw [hst]
   simp only [monadLift_some, pure_bind]
@@ -526,10 +544,11 @@ theorem isValidSolution_equihash_0_3_0?_448_63 (input nonce : List ℕ) :
     `1 · 9 / 8 = 1` byte, though a solution has `2^64` nine-bit indices. Every one-byte solution
     passes it and decodes to no indices, and the verifier then panics: `512 / n = 0`, so
     `initialise_state` asks `blake2b_simd` for a zero-byte digest, which it refuses. -/
-theorem isValidSolution_equihash_0_3_0?_520_64 (input nonce : List ℕ) (b : ℕ) :
+theorem isValidSolution_equihash_0_3_0?_520_64 (impl : Blake2b.Implementation)
+    (input nonce : List ℕ) (b : ℕ) :
     Params.newUnbounded? 520 64 = some ⟨520, 64⟩ ∧
       indicesFromMinimalWrapping? ⟨520, 64⟩ [b] = some (some []) ∧
-      (isValidSolution_equihash_0_3_0? 520 64 input nonce [b]).run = none := by
+      (isValidSolution_equihash_0_3_0? impl 520 64 input nonce [b]).run = none := by
   have hp : Params.newUnbounded? 520 64 = some ⟨520, 64⟩ := rfl
   have hd : indicesFromMinimalWrapping? ⟨520, 64⟩ [b] = some (some []) := by
     rw [indicesFromMinimalWrapping?_eq]
@@ -581,17 +600,20 @@ theorem blake2bSimdHash?_spec {rp : Params} {p : ZakuraParams} (h : rp.Is p) {S 
     exact ⟨by rw [(hd d (by simp)).2],
       ih ds (by simpa using hl) fun d' hd' => hd d' (by simp [hd'])⟩
 
-/-- **`equihash 0.3.1`'s `is_valid_solution` is correct**, for parameters Zakura accepts and an
-    `input ‖ nonce` of any length: it returns `Ok(())` exactly when the solutions are under
-    `2^62` bits long and the solution bytes encode a solution valid by §7.7.1, for
-    `powheader = input ‖ nonce` under BLAKE2b. On a 140-byte `input ‖ nonce` the leaf hasher
-    computes BLAKE2b, under any kernel; on any other, `blake2b_simd` is assumed to. -/
-theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraParams)
-    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
-    (isValidSolution_equihash_0_3_1? kernel p.n p.k input nonce soln).run = some (.ok ()) ↔
+/-- **`equihash 0.3.1`'s `is_valid_solution` is correct**, for parameters Zakura accepts, either
+    `blake2b_simd` implementation, and an `input ‖ nonce` under `2^64` bytes, as two Rust slices
+    are: it returns `Ok(())` exactly when the solutions are under `2^62` bits long and the
+    solution bytes encode a solution valid by §7.7.1, for `powheader = input ‖ nonce` under
+    BLAKE2b. On a 140-byte `input ‖ nonce` the leaf hasher computes BLAKE2b, under any kernel;
+    on any other length, `blake2b_simd` does. -/
+theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (impl : Blake2b.Implementation)
+    (p : ZakuraParams) (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce)
+    (hsoln : Bytes soln) (hsz : input.length + nonce.length < 2 ^ 64) :
+    (isValidSolution_equihash_0_3_1? kernel impl p.n p.k input nonce soln).run = some (.ok ()) ↔
       2 ^ p.k * (p.digitBits + 1) < 2 ^ 62 ∧
       ∃ i, EncodesSolution p.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+        ValidSolution Spec.Blake2b.hashFn p.toParams (bytesOf (input ++ nonce)) i := by
+  rw [← Blake2b.hashFn_eq]
   have h : (⟨p.n, p.k⟩ : Params).Is p := ⟨rfl, rfl⟩
   unfold isValidSolution_equihash_0_3_1?
   rw [Params.newUnbounded?_zakura]
@@ -634,9 +656,10 @@ theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraPar
     obtain ⟨t, -, rfl⟩ := List.mem_map.mp hj
     exact digitVal_lt _ _ _
   -- The state `blake2b_simd` would hash from.
-  obtain ⟨st₀, hst₀eq, hst₀⟩ := initialiseState?_spec h
+  obtain ⟨st₀, hst₀eq, hst₀⟩ := initialiseState?_spec h impl
   have hst : StateFor p.toParams (bytesOf (input ++ nonce)) ((st₀.update input).update nonce) := by
-    simpa [List.map_append] using (hst₀.update input hin).update nonce hnon
+    simpa [List.map_append] using
+      (hst₀.update input hin (by simp; omega)).update nonce hnon (by simp; omega)
   by_cases h140 : input.length + nonce.length = 140
   · -- The leaf hasher.
     obtain ⟨lh, hlh, hhash⟩ := leafHasher_spec h input nonce hin hnon h140 kernel
@@ -646,7 +669,7 @@ theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraPar
         Blake2b.blake2b (⟨p.n, p.k⟩ : Params).hashOutput (personalOf ⟨p.n, p.k⟩)
           (input ++ nonce ++ u32ToLeBytes b) ++
           List.replicate (64 - (⟨p.n, p.k⟩ : Params).hashOutput) 0)
-      (fun b => by rw [generateHash_blake2b h hst₀])
+      (fun b => by rw [generateHash_blake2b h hst₀ _ _ hsz])
       (fun bs ds hl hd => hhash bs ds hl fun d hd' => (hd d hd').1) hL).trans
       (good_iff_validSolution _ _ _ _ hL hbound)]
     exact decoded_iff p soln _ hBL
@@ -662,30 +685,33 @@ theorem isValidSolution_equihash_0_3_1?_correct (kernel : Kernel) (p : ZakuraPar
     exact decoded_iff p soln _ hBL
 
 /-- **`equihash 0.3.1`'s `is_valid_solution(200, 9, …)`** returns `Ok(())` exactly for the
-    1344-byte encodings of §7.7.1-valid solutions, for any input. -/
-theorem isValidSolution_equihash_0_3_1?_zcash (kernel : Kernel) (input nonce soln : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
-    (isValidSolution_equihash_0_3_1? kernel 200 9 input nonce soln).run = some (.ok ()) ↔
+    1344-byte encodings of §7.7.1-valid solutions, for any input under `2^64` bytes. -/
+theorem isValidSolution_equihash_0_3_1?_zcash (kernel : Kernel) (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
+    (hsz : input.length + nonce.length < 2 ^ 64) :
+    (isValidSolution_equihash_0_3_1? kernel impl 200 9 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution zcashParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
-  exact (isValidSolution_equihash_0_3_1?_correct kernel zcashParams input nonce soln hin hnon
-    hsoln).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
+        ValidSolution Spec.Blake2b.hashFn zcashParams.toParams (bytesOf (input ++ nonce)) i := by
+  exact (isValidSolution_equihash_0_3_1?_correct kernel impl zcashParams input nonce soln hin hnon
+    hsoln hsz).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
 
 /-- **`equihash 0.3.1`'s `is_valid_solution(48, 5, …)`**, likewise. -/
-theorem isValidSolution_equihash_0_3_1?_regtest (kernel : Kernel) (input nonce soln : List ℕ)
-    (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln) :
-    (isValidSolution_equihash_0_3_1? kernel 48 5 input nonce soln).run = some (.ok ()) ↔
+theorem isValidSolution_equihash_0_3_1?_regtest (kernel : Kernel) (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) (hin : Bytes input) (hnon : Bytes nonce) (hsoln : Bytes soln)
+    (hsz : input.length + nonce.length < 2 ^ 64) :
+    (isValidSolution_equihash_0_3_1? kernel impl 48 5 input nonce soln).run = some (.ok ()) ↔
       ∃ i, EncodesSolution regtestParams.toParams (bytesOf soln) i ∧
-        ValidSolution Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
-  exact (isValidSolution_equihash_0_3_1?_correct kernel regtestParams input nonce soln hin hnon
-    hsoln).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
+        ValidSolution Spec.Blake2b.hashFn regtestParams.toParams (bytesOf (input ++ nonce)) i := by
+  exact (isValidSolution_equihash_0_3_1?_correct kernel impl regtestParams input nonce soln hin
+    hnon hsoln hsz).trans ⟨fun ⟨_, hrest⟩ => hrest, fun hrest => ⟨by decide, hrest⟩⟩
 
 /-- **`equihash 0.3.1` checks the solution length for overflow.** Its `Params::new` still
     accepts `(448, 63)`, whose length 0.3.0 wraps, but `solution_bytes` is `None`, `2^63 · 8`
     overflowing a `usize`, so every solution is rejected as `InvalidParams`. -/
-theorem isValidSolution_equihash_0_3_1?_448_63 (kernel : Kernel) (input nonce soln : List ℕ) :
+theorem isValidSolution_equihash_0_3_1?_448_63 (kernel : Kernel) (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) :
     Params.newUnbounded? 448 63 = some ⟨448, 63⟩ ∧ Params.solutionBytes? ⟨448, 63⟩ = none ∧
-      (isValidSolution_equihash_0_3_1? kernel 448 63 input nonce soln).run =
+      (isValidSolution_equihash_0_3_1? kernel impl 448 63 input nonce soln).run =
         some (.error .InvalidParams) := by
   refine ⟨rfl, rfl, ?_⟩
   unfold isValidSolution_equihash_0_3_1?
@@ -695,9 +721,10 @@ theorem isValidSolution_equihash_0_3_1?_448_63 (kernel : Kernel) (input nonce so
   rfl
 
 /-- **Likewise `(520, 64)`**: `1 << 64` overflows, so `solution_indices` is `None`. -/
-theorem isValidSolution_equihash_0_3_1?_520_64 (kernel : Kernel) (input nonce soln : List ℕ) :
+theorem isValidSolution_equihash_0_3_1?_520_64 (kernel : Kernel) (impl : Blake2b.Implementation)
+    (input nonce soln : List ℕ) :
     Params.newUnbounded? 520 64 = some ⟨520, 64⟩ ∧ Params.solutionIndices? ⟨520, 64⟩ = none ∧
-      (isValidSolution_equihash_0_3_1? kernel 520 64 input nonce soln).run =
+      (isValidSolution_equihash_0_3_1? kernel impl 520 64 input nonce soln).run =
         some (.error .InvalidParams) := by
   refine ⟨rfl, rfl, ?_⟩
   unfold isValidSolution_equihash_0_3_1?
