@@ -124,7 +124,7 @@ def regtestSolution : List ℕ :=
 
 -- Valid, reading BLAKE2b's output most significant bit first, as `Spec.lean` does.
 #guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
-  decide (ValidSolution Blake2b.hashFn zcash powheader i)
+  decide (ValidSolution Verifier.Blake2b.hashFn zcash powheader i)
 
 -- Its bytes are the encoding of its indices.
 #guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
@@ -132,7 +132,7 @@ def regtestSolution : List ℕ :=
 
 -- The Regtest genesis block: valid, and its bytes are its encoding.
 #guard (toIndices? regtest (indicesOf 9 32 regtestSolution)).any fun i =>
-  decide (ValidSolution Blake2b.hashFn regtest (bytesOf (regtestHeader ++ regtestNonce)) i)
+  decide (ValidSolution Verifier.Blake2b.hashFn regtest (bytesOf (regtestHeader ++ regtestNonce)) i)
 #guard (toIndices? regtest (indicesOf 9 32 regtestSolution)).any fun i =>
   decide (EncodesSolution regtest (bytesOf regtestSolution) i)
 
@@ -147,7 +147,7 @@ def reverseBits (b : ℕ) : ℕ := (List.range 8).foldl (fun acc j => 2 * acc + 
 /-- BLAKE2b with each output byte's bits reversed: reading it most significant bit first reads
     BLAKE2b least significant bit first. -/
 def leastSignificantFirst : HashFn := fun p x =>
-  (Blake2b.hashFn p x).map fun b => BitVec.ofNat 8 (reverseBits b.toNat)
+  (Verifier.Blake2b.hashFn p x).map fun b => BitVec.ofNat 8 (reverseBits b.toNat)
 
 -- Not valid, reading it least significant bit first.
 #guard (toIndices? zcash (indicesOf 21 512 solution)).any fun i =>
