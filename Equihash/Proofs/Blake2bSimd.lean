@@ -489,4 +489,16 @@ theorem finalize_foldl_update (params : Params)
   simp only [List.nil_append] at h
   exact h.finalize (hi ▸ ok) hℓ hlen
 
+/-! ## The setters -/
+
+/-- `Params::hash_length` panics exactly on a length outside `1 ..= 64`. -/
+theorem Params.hashLength?_isSome (params : Params) (ℓ : ℕ) :
+    (params.hashLength? ℓ).isSome ↔ 1 ≤ ℓ ∧ ℓ ≤ 64 := by
+  by_cases h : 1 ≤ ℓ ∧ ℓ ≤ 64 <;> simp [Params.hashLength?, outBytes, h]
+
+/-- `Params::personal` panics exactly on a personalization over 16 bytes. -/
+theorem Params.personal?_isSome (params : Params) (x : List ℕ) :
+    (params.personal? x).isSome ↔ x.length ≤ 16 := by
+  by_cases h : x.length ≤ 16 <;> simp [Params.personal?, personalBytes, h]
+
 end Equihash.Verifier.Blake2b
