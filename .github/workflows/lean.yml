@@ -31,6 +31,8 @@ jobs:
             crates zakura-equihash 5.4.0 e43cca7a1758ef0075c5b810dd02acd536bb089e2d34f987026fdafa7aa1176f rust/zakura-equihash-5.4.0
             crates equihash 0.3.0 306286e8dcc39ab3dfceb74c792ce8baffdab90591321d3ffaae64829734c37f rust/equihash-0.3.0
             crates equihash 0.3.1 49eac9289a160ac92d99537b3434a1a3696df0177fe2c66818bdb9a33b6d5770 rust/equihash-0.3.1
+            crates blake2b_simd 1.0.4 b79834656f71332577234b50bfc009996f7449e0c056884e6a02492ded0ca2f3 rust/blake2b_simd-1.0.4
+            crates arrayref 0.3.9 76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb rust/arrayref-0.3.9
         run: |
           set -euo pipefail
           pinned=()
