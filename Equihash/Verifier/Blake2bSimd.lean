@@ -130,4 +130,128 @@ def compressBlock (block : List ℕ) (words : Array UInt64) (count : ℕ)
 
 end Portable
 
+/-! ## `src/avx2.rs` -/
+
+namespace Avx2
+
+/-- `rot32`, `rot24`, `rot16`, `rot63` (lines 87–104): two shifts and an or. -/
+def rot (n : ℕ) (x : M256i) : M256i := mm256OrSi256 (mm256SrliEpi64 n x) (mm256SlliEpi64 (64 - n) x)
+
+/-- The state's four rows `a`, `b`, `c`, `d`, which `g1`, `g2`, `diagonalize` and
+    `undiagonalize` take as `&mut __m256i` and update. -/
+abbrev Rows := M256i × M256i × M256i × M256i
+
+/-- `g1` (lines 107–117). -/
+def g1 (s : Rows) (m : M256i) : Rows :=
+  let (a, b, c, d) := s
+  let a := mm256AddEpi64 (mm256AddEpi64 a m) b
+  let d := rot 32 (mm256XorSi256 d a)
+  let c := mm256AddEpi64 c d
+  let b := rot 24 (mm256XorSi256 b c)
+  (a, b, c, d)
+
+/-- `g2` (lines 120–130). -/
+def g2 (s : Rows) (m : M256i) : Rows :=
+  let (a, b, c, d) := s
+  let a := mm256AddEpi64 (mm256AddEpi64 a m) b
+  let d := rot 16 (mm256XorSi256 d a)
+  let c := mm256AddEpi64 c d
+  let b := rot 63 (mm256XorSi256 b c)
+  (a, b, c, d)
+
+/-- `_MM_SHUFFLE!(z, y, x, w)` (lines 71–75). -/
+def mmShuffle (z y x w : ℕ) : ℕ := z <<< 6 ||| y <<< 4 ||| x <<< 2 ||| w
+
+/-- `diagonalize` (lines 136–142): `a`, `c` and `d` rotated by one, three and two words, `b`
+    left in place. -/
+def diagonalize (s : Rows) : Rows :=
+  let (a, b, c, d) := s
+  (mm256Permute4x64Epi64 (mmShuffle 2 1 0 3) a, b, mm256Permute4x64Epi64 (mmShuffle 0 3 2 1) c,
+    mm256Permute4x64Epi64 (mmShuffle 1 0 3 2) d)
+
+/-- `undiagonalize` (lines 145–151). -/
+def undiagonalize (s : Rows) : Rows :=
+  let (a, b, c, d) := s
+  (mm256Permute4x64Epi64 (mmShuffle 0 3 2 1) a, b, mm256Permute4x64Epi64 (mmShuffle 2 1 0 3) c,
+    mm256Permute4x64Epi64 (mmShuffle 1 0 3 2) d)
+
+/-- One of the shuffles that build `t0` and `t1` from the message vectors `m0 … m7`:
+    `_mm256_unpacklo_epi64(mX, mY)`, `_mm256_unpackhi_epi64(mX, mY)`,
+    `_mm256_alignr_epi8(mX, mY, 8)`, `_mm256_blend_epi32(mX, mY, 0x33)`, or
+    `_mm256_shuffle_epi32(mX, _MM_SHUFFLE!(1, 0, 3, 2))`. -/
+inductive Shuffle where
+  | lo (x y : ℕ)
+  | hi (x y : ℕ)
+  | alignr (x y : ℕ)
+  | blend (x y : ℕ)
+  | swap (x : ℕ)
+deriving Inhabited
+
+/-- The vector a `Shuffle` makes from the message vectors `m`. -/
+def Shuffle.apply (m : Array M256i) : Shuffle → M256i
+  | .lo x y => mm256UnpackloEpi64 m[x]! m[y]!
+  | .hi x y => mm256UnpackhiEpi64 m[x]! m[y]!
+  | .alignr x y => mm256AlignrEpi8 8 m[x]! m[y]!
+  | .blend x y => mm256BlendEpi32 0x33 m[x]! m[y]!
+  | .swap x => mm256ShuffleEpi32 (mmShuffle 1 0 3 2) m[x]!
+
+open Shuffle in
+/-- The rounds of `compress_block` (lines 186–424), each written out there as four steps: for
+    column `g1`, column `g2`, diagonal `g1` and diagonal `g2`, the two shuffles giving `t0` and
+    `t1`, then `b0 = _mm256_blend_epi32(t0, t1, 0xF0)`. Row `r` is lines `186 + 20r` to
+    `204 + 20r`. -/
+def rounds : List (List (Shuffle × Shuffle)) := [
+  [(lo 0 1, lo 2 3), (hi 0 1, hi 2 3), (lo 7 4, lo 5 6), (hi 7 4, hi 5 6)],
+  [(lo 7 2, hi 4 6), (lo 5 4, alignr 3 7), (hi 2 0, blend 5 0), (alignr 6 1, blend 3 1)],
+  [(alignr 6 5, hi 2 7), (lo 4 0, blend 6 1), (alignr 5 4, hi 1 3), (lo 2 7, blend 0 3)],
+  [(hi 3 1, hi 6 5), (hi 4 0, lo 6 7), (alignr 1 7, swap 2), (lo 4 3, lo 5 0)],
+  [(hi 4 2, lo 1 5), (blend 3 0, blend 7 2), (alignr 7 1, alignr 3 5), (hi 6 0, lo 6 4)],
+  [(lo 1 3, lo 0 4), (lo 6 5, hi 5 1), (alignr 2 0, hi 3 7), (hi 4 6, alignr 7 2)],
+  [(blend 0 6, lo 7 2), (hi 2 7, alignr 5 6), (lo 4 0, blend 4 3), (hi 5 3, swap 1)],
+  [(hi 6 3, blend 1 6), (alignr 7 5, hi 0 4), (blend 2 1, alignr 4 7), (lo 5 0, lo 2 3)],
+  [(lo 3 7, alignr 0 5), (hi 7 4, alignr 4 1), (lo 5 6, hi 6 0), (alignr 1 2, alignr 2 3)],
+  [(lo 5 4, hi 3 0), (lo 1 2, blend 2 3), (hi 6 7, hi 4 1), (blend 5 0, lo 7 6)],
+  [(lo 0 1, lo 2 3), (hi 0 1, hi 2 3), (lo 7 4, lo 5 6), (hi 7 4, hi 5 6)],
+  [(lo 7 2, hi 4 6), (lo 5 4, alignr 3 7), (hi 2 0, blend 5 0), (alignr 6 1, blend 3 1)]]
+
+/-- `b0`, from the shuffles giving `t0` and `t1`. -/
+def b0 (m : Array M256i) (t : Shuffle × Shuffle) : M256i :=
+  mm256BlendEpi32 0xF0 (t.1.apply m) (t.2.apply m)
+
+/-- One round: `g1`, `g2`, `diagonalize`, `g1`, `g2`, `undiagonalize`, each `g` given its `b0`. -/
+def round (m : Array M256i) (r : List (Shuffle × Shuffle)) (s : Rows) : Rows :=
+  undiagonalize (g2 (g1 (diagonalize (g2 (g1 s (b0 m r[0]!)) (b0 m r[1]!))) (b0 m r[2]!))
+    (b0 m r[3]!))
+
+/-- `compress_block` (lines 154–434): the state words, `IV` and the flags as four rows `a`, `b`,
+    `c`, `d`; the eight 16-byte message chunks, each broadcast to both 128-bit lanes; the twelve
+    rounds; then `a ^ c ^ iv0` and `b ^ d ^ iv1` stored back. -/
+def compressBlock (block : List ℕ) (words : Array UInt64) (count : ℕ)
+    (lastBlock lastNode : UInt64) : Array UInt64 :=
+  let a := mm256LoaduSi256 (words.extract 0 4)
+  let b := mm256LoaduSi256 (words.extract 4 8)
+  let c := mm256LoaduSi256 (IV.extract 0 4)
+  let flags := mm256SetrEpi64x (countLow count) (countHigh count) lastBlock lastNode
+  let d := mm256XorSi256 (mm256LoaduSi256 (IV.extract 4 8)) flags
+  let m := (List.range 8).toArray.map fun k =>
+    mm256Broadcastsi128Si256 (mmLoaduSi128 ((block.drop (16 * k)).take 16))
+  let (a', b', c', d') := rounds.foldl (fun s r => round m r s) (a, b, c, d)
+  let a' := mm256XorSi256 (mm256XorSi256 a' c') a
+  let b' := mm256XorSi256 (mm256XorSi256 b' d') b
+  mm256StoreuSi256 a' ++ mm256StoreuSi256 b'
+
+end Avx2
+
+/-- The `compress_block` each implementation's loop calls. -/
+def Implementation.compressBlock :
+    Implementation → List ℕ → Array UInt64 → ℕ → UInt64 → UInt64 → Array UInt64
+  | .avx2 => Avx2.compressBlock
+  | .portable => Portable.compressBlock
+
+/-- `Implementation::compress1_loop` (`src/guts.rs`, lines 96–116): the AVX2 loop on an AVX2
+    implementation, the portable loop otherwise. -/
+def Implementation.compress1Loop (impl : Implementation) :
+    List ℕ → Array UInt64 → ℕ → Bool → Array UInt64 :=
+  Blake2b.compress1Loop impl.compressBlock
+
 end Equihash.Verifier.Blake2b
