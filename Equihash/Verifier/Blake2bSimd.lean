@@ -254,4 +254,94 @@ def Implementation.compress1Loop (impl : Implementation) :
     List ℕ → Array UInt64 → ℕ → Bool → Array UInt64 :=
   Blake2b.compress1Loop impl.compressBlock
 
+/-! ## `Params`, `State` and `Hash` (`src/lib.rs`) -/
+
+/-- `Params` (lines 146–160), reduced to the fields the verifiers set; the others keep
+    `Params::new`'s values: no key or salt, fanout and depth 1, the other tree fields 0, and
+    `LastNode::No`. -/
+structure Params where
+  hashLength : ℕ
+  personal : List ℕ
+  implementation : Implementation
+
+/-- `Params::new` (lines 165–182), with the implementation `detect` picks. -/
+def Params.new (implementation : Implementation) : Params :=
+  { hashLength := outBytes, personal := List.replicate personalBytes 0, implementation }
+
+/-- `Params::hash_length` (lines 238–246). -/
+def Params.hashLength? (self : Params) (length : ℕ) : Option Params := do
+  guard (1 ≤ length ∧ length ≤ outBytes)
+  return { self with hashLength := length }
+
+/-- `Params::personal` (lines 272–281): at most `PERSONALBYTES`, padded with zeros. -/
+def Params.personal? (self : Params) (personalization : List ℕ) : Option Params := do
+  guard (personalization.length ≤ personalBytes)
+  return { self with
+    personal := personalization ++ List.replicate (personalBytes - personalization.length) 0 }
+
+/-- `Params::to_words` (lines 185–204), with the fields the verifiers leave at `Params::new`'s
+    values: key length 0, fanout 1, depth 1, the other tree fields 0, no salt. -/
+def Params.toWords (self : Params) : Array UInt64 := #[
+  IV[0]! ^^^ UInt64.ofNat self.hashLength ^^^ (1 : UInt64) <<< 16 ^^^ (1 : UInt64) <<< 24,
+  IV[1]!, IV[2]!, IV[3]!,
+  IV[4]!, IV[5]!, IV[6]! ^^^ u64FromLeBytes (self.personal.take 8),
+  IV[7]! ^^^ u64FromLeBytes ((self.personal.drop 8).take 8)]
+
+/-- `State` (lines 389–398): the words, the 128-bit count of bytes compressed, the buffer of
+    bytes not yet compressed and its length, the output length and the implementation; never
+    keyed, and `LastNode::No`. -/
+structure State where
+  words : Array UInt64
+  count : ℕ
+  buf : List ℕ
+  buflen : ℕ
+  hashLength : ℕ
+  implementation : Implementation
+
+/-- `Params::to_state` (lines 230–232), `State::with_params` (lines 406–422). -/
+def Params.toState (self : Params) : State :=
+  { words := self.toWords, count := 0, buf := List.replicate BLOCKBYTES 0, buflen := 0,
+    hashLength := self.hashLength, implementation := self.implementation }
+
+/-- `State::fill_buf` (lines 424–429): as much of `input` as fits, copied after the buffered
+    bytes; the rest of `input`. -/
+def State.fillBuf (self : State) (input : List ℕ) : State × List ℕ :=
+  let take := min (BLOCKBYTES - self.buflen) input.length
+  let buf := self.buf.take self.buflen ++ input.take take ++ self.buf.drop (self.buflen + take)
+  ({ self with buf, buflen := self.buflen + take }, input.drop take)
+
+/-- `State::compress_buffer_if_possible` (lines 434–450): a partly full buffer is filled, and
+    compressed only if more input follows. -/
+def State.compressBufferIfPossible (self : State) (input : List ℕ) : State × List ℕ :=
+  if self.buflen > 0 then
+    let (self, input) := self.fillBuf input
+    if input ≠ [] then
+      let words := self.implementation.compress1Loop self.buf self.words self.count false
+      ({ self with words, count := (self.count + BLOCKBYTES) % 2 ^ 128, buflen := 0 }, input)
+    else (self, input)
+  else (self, input)
+
+/-- `State::update` (lines 453–478): the buffer, then the whole blocks of `input` but the last
+    byte, compressed; the rest buffered. -/
+def State.update (self : State) (input : List ℕ) : State :=
+  let (self, input) := self.compressBufferIfPossible input
+  let «end» := (input.length - 1) - (input.length - 1) % BLOCKBYTES
+  let (self, input) :=
+    if «end» > 0 then
+      let words := self.implementation.compress1Loop (input.take «end») self.words self.count false
+      ({ self with words, count := (self.count + «end») % 2 ^ 128 }, input.drop «end»)
+    else (self, input)
+  (self.fillBuf input).1
+
+/-- `state_words_to_bytes` (lines 529–544): the words' bytes, little-endian. -/
+def stateWordsToBytes (words : Array UInt64) : List ℕ :=
+  (List.range 8).flatMap fun i => u64ToLeBytes words[i]!
+
+/-- `State::finalize` (lines 482–496), then `Hash::as_bytes` (lines 589–591): the buffered bytes
+    compressed as the last block, the first `hash_length` bytes of the words. -/
+def State.finalize (self : State) : List ℕ :=
+  let words := self.implementation.compress1Loop (self.buf.take self.buflen) self.words self.count
+    true
+  (stateWordsToBytes words).take self.hashLength
+
 end Equihash.Verifier.Blake2b

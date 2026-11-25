@@ -2,9 +2,11 @@
 BLAKE2b on the test vector of RFC 7693, Appendix A: BLAKE2b-512 of `"abc"`, with no key and
 a zero personalization; then BLAKE2b-400 of 144 bytes, two blocks, personalized as Equihash's
 `(200, 9)` hash is, with the digest Python's `hashlib.blake2b` gives. Each is checked on
-RFC 7693's model and on the specification.
+RFC 7693's model, the specification, and `blake2b_simd`'s `State` under both implementations,
+the second input in two `update`s.
 -/
 import Equihash.Verifier.Blake2b
+import Equihash.Verifier.Blake2bSimd
 import Equihash.Spec.Blake2b
 
 open Equihash Equihash.Verifier.Blake2b
@@ -42,3 +44,14 @@ def specBlake2b (len : ℕ) (hlen : len ≤ 64) (p x : List ℕ) : List ℕ :=
 #guard specBlake2b 64 (by decide) (List.replicate 16 0) abc = abcDigest
 #guard blake2b 50 zcashPersonal zcashInput = zcashDigest
 #guard specBlake2b 50 (by decide) zcashPersonal zcashInput = zcashDigest
+
+/-- `blake2b_simd`'s `State`: `to_state`, `update` with each piece of `x`, `finalize`. -/
+def simdBlake2b (impl : Implementation) (len : ℕ) (p : List ℕ) (xs : List (List ℕ)) : List ℕ :=
+  (xs.foldl State.update (Params.toState ⟨len, p, impl⟩)).finalize
+
+#guard simdBlake2b .portable 64 (List.replicate 16 0) [abc] = abcDigest
+#guard simdBlake2b .avx2 64 (List.replicate 16 0) [abc] = abcDigest
+#guard simdBlake2b .portable 50 zcashPersonal [zcashInput.take 140, zcashInput.drop 140] =
+  zcashDigest
+#guard simdBlake2b .avx2 50 zcashPersonal [zcashInput.take 140, zcashInput.drop 140] =
+  zcashDigest
