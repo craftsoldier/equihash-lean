@@ -12,5 +12,6 @@ public import Equihash.Spec
 public import Equihash.Spec.Blake2b
 public import Equihash.Verifier.Recursive
 public import Equihash.Verifier.Releases
+public import Equihash.Proofs.Blake2bSpec
 public import Equihash.Proofs.Recursive
 public import Equihash.Proofs.Releases
