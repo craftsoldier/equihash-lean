@@ -1,10 +1,10 @@
 import Lake
 open Lake DSL
 
-/-- Mathlib `v4.35.0`, at its commit. -/
+/-- Mathlib `v4.36.0`, at its commit. -/
 require mathlib from git
   "https://github.com/leanprover-community/mathlib4.git" @
-    "56a005855ea17e0b0958f73ec801ae140b0a1679"
+    "fc4f59e577feb1a4956671bc04ac18aaaf8cd842"
 
 package «equihash» where
   leanOptions := #[
