@@ -17,6 +17,64 @@ public import Equihash.Verifier.Params
 
 @[expose] public section
 
+namespace Equihash.Verifier.Blake2b
+
+/-! ## The `blake2b_simd` interface -/
+
+/-- `OUTBYTES`: the largest output length, in bytes. -/
+def outBytes : ℕ := 64
+
+/-- `PERSONALBYTES`: the length of a personalization, in bytes. -/
+def personalBytes : ℕ := 16
+
+/-- `blake2b_simd::Params`, reduced to the fields the verifier sets. -/
+structure Params where
+  hashLength : ℕ
+  personal : List ℕ
+
+/-- `Params::new`: output length `OUTBYTES`, zero personalization. -/
+def Params.new : Params := { hashLength := outBytes, personal := List.replicate personalBytes 0 }
+
+/-- `Params::hash_length`:
+
+```rust
+assert!(1 <= length && length <= OUTBYTES, "Bad hash length: {}", length);
+self.hash_length = length as u8;
+``` -/
+def Params.hashLength? (self : Params) (length : ℕ) : Option Params := do
+  guard (1 ≤ length ∧ length ≤ outBytes)
+  return { self with hashLength := length }
+
+/-- `Params::personal`:
+
+```rust
+assert!(personalization.len() <= PERSONALBYTES, ...);
+self.personal = [0; PERSONALBYTES];
+self.personal[..personalization.len()].copy_from_slice(personalization);
+``` -/
+def Params.personal? (self : Params) (personalization : List ℕ) : Option Params := do
+  guard (personalization.length ≤ personalBytes)
+  return { self with
+    personal := personalization ++ List.replicate (personalBytes - personalization.length) 0 }
+
+/-- `blake2b_simd::State`: the parameters it was built from, and the input absorbed so far. -/
+structure State where
+  params : Params
+  input : List ℕ
+
+/-- `Params::to_state`. -/
+def Params.toState (self : Params) : State := { params := self, input := [] }
+
+/-- `State::update`. -/
+def State.update (self : State) (input : List ℕ) : State :=
+  { self with input := self.input ++ input }
+
+/-- `State::finalize`, then `Hash::as_bytes`: the hash of everything absorbed. -/
+def State.finalize (self : State) : List ℕ :=
+  blake2b self.params.hashLength self.params.personal self.input
+
+end Equihash.Verifier.Blake2b
+
 namespace Equihash.Verifier
 
 /-- `Node` (`src/verify.rs`, lines 27–30; 0.3.0: 16–19): a subtree's expanded hash, and its
