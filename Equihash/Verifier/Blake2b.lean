@@ -100,7 +100,7 @@ theorem length_blake2b (outLen : ℕ) (personal input : List ℕ) :
 
 /-- BLAKE2b as the specification's hash function `BLAKE2b-ℓ(p, x)`. -/
 def hashFn : HashFn := fun p x =>
-  ⟨(blake2b p.len (p.personal.map BitVec.toNat) (x.map BitVec.toNat)).map (BitVec.ofNat 8),
+  ⟨(blake2b p.len (p.personal.toList.map BitVec.toNat) (x.map BitVec.toNat)).map (BitVec.ofNat 8),
     by simp [length_blake2b]⟩
 
 /-! ## The `blake2b_simd` interface -/
